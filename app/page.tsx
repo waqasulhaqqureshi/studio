@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { StudioState, MacOsFrameStyle, TabAnimationType, ExportFormat } from '@/lib/types';
+import { StudioState, MacOsFrameStyle, TabAnimationType, TabAspectRatio, ExportFormat } from '@/lib/types';
 import { renderStudioFrame } from '@/lib/canvasRenderer';
 import { StudioVideoExporter, ExportProgress } from '@/lib/videoExporter';
 import { 
@@ -24,7 +24,7 @@ import {
   Square,
   FileVideo,
   Sparkles,
-  Layers
+  Maximize2
 } from 'lucide-react';
 
 const INITIAL_STATE: StudioState = {
@@ -35,6 +35,8 @@ const INITIAL_STATE: StudioState = {
   macFrameStyle: 'safari-sonoma-dark',
   tabTitle: 'studio.app',
   tabUrl: 'https://studio.app/preview',
+  tabAspectRatio: '16:9',
+  tabScale: 0.82,
   animationType: '3d-flip-h',
   flipInterval: 3.0,
   animationSpeed: 1.0,
@@ -52,6 +54,14 @@ const MAC_STYLES: { id: MacOsFrameStyle; name: string; desc: string }[] = [
   { id: 'chrome-macos', name: 'Chrome macOS', desc: 'Modern macOS Chrome window frame' },
   { id: 'glass-frost-mac', name: 'Glass Frost macOS', desc: 'Translucent frosted glass window' },
   { id: 'minimal-mac', name: 'Minimal macOS', desc: 'Clean titlebar with traffic lights' },
+];
+
+const TAB_RATIOS: { id: TabAspectRatio; label: string; sub: string }[] = [
+  { id: '16:9', label: '16:9', sub: 'Standard Landscape' },
+  { id: '4:3', label: '4:3', sub: 'iPad / Desktop' },
+  { id: '1:1', label: '1:1', sub: 'Square' },
+  { id: '9:16', label: '9:16', sub: 'Vertical Phone' },
+  { id: 'auto', label: 'Auto', sub: 'Fit Video Native' },
 ];
 
 const ANIMATION_PRESETS: { id: TabAnimationType; name: string; desc: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -137,7 +147,7 @@ export default function StudioPage() {
     }
   }, [state.isExporting]);
 
-  // Ultra-Smooth 60 FPS Decoupled Canvas Loop with Alpha Channel
+  // Ultra-Smooth 60 FPS Decoupled Canvas Loop
   useEffect(() => {
     let animId: number;
     const canvas = canvasRef.current;
@@ -241,7 +251,7 @@ export default function StudioPage() {
     showToast('Background video excluded — Alpha Transparency Active');
   };
 
-  // HD Poster Screenshot (preserves transparent background if no bg video)
+  // HD Poster Screenshot
   const handleCaptureScreenshot = () => {
     const exporter = new StudioVideoExporter();
     const dataUrl = exporter.captureStillFrame(stateRef.current, bgVideoRef.current, tabVideoRef.current);
@@ -249,11 +259,11 @@ export default function StudioPage() {
 
     const a = document.createElement('a');
     a.href = dataUrl;
-    a.download = `macos-tab-mockup-${Date.now()}.png`;
+    a.download = `macos-tab-16x9-${Date.now()}.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    showToast('HD 3:4 Poster Frame (PNG) downloaded with transparency!');
+    showToast('HD 3:4 Poster Frame (PNG) downloaded!');
   };
 
   // Video Export Handler
@@ -344,7 +354,7 @@ export default function StudioPage() {
             <div className="flex items-center space-x-2">
               <span className="font-bold text-sm text-white">VideoTab Studio</span>
               <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30">
-                macOS Tab Flip
+                16:9 macOS Tab
               </span>
               {isTransparentAlphaActive && (
                 <span className="hidden sm:inline-flex items-center space-x-1 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
@@ -360,7 +370,7 @@ export default function StudioPage() {
           <button
             onClick={handleCaptureScreenshot}
             className="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white text-xs font-medium transition-all flex items-center space-x-1.5"
-            title="Download HD Poster PNG (with transparency)"
+            title="Download HD Poster PNG"
           >
             <Camera className="w-3.5 h-3.5 text-sky-400" />
             <span className="hidden sm:inline">Capture PNG</span>
@@ -385,7 +395,6 @@ export default function StudioPage() {
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         {/* Left Canvas Preview Stage */}
         <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 bg-neutral-950/80 relative overflow-hidden">
-          {/* Transparent Checkerboard Pattern (reveals true alpha transparency when no bg video) */}
           <div 
             className="absolute inset-0 opacity-15 pointer-events-none"
             style={{
@@ -395,7 +404,6 @@ export default function StudioPage() {
             }}
           />
 
-          {/* 3:4 Portrait Canvas Container */}
           <div
             className="relative shadow-2xl rounded-2xl overflow-hidden ring-1 ring-neutral-800 transition-all"
             style={{
@@ -422,7 +430,7 @@ export default function StudioPage() {
         {/* Right Sidebar */}
         <div className="w-full md:w-88 lg:w-96 border-t md:border-t-0 md:border-l border-neutral-800 bg-neutral-950 p-5 overflow-y-auto custom-scrollbar space-y-5 shrink-0 z-10">
           
-          {/* SECTION 1: Up Layer (Tab Content Video) */}
+          {/* SECTION 1: Up Layer (Tab Content Video & 16:9 Ratio Selector) */}
           <div className="space-y-3 bg-neutral-900/60 p-4 rounded-xl border border-neutral-800/80">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
@@ -472,6 +480,47 @@ export default function StudioPage() {
                 {state.tabVideoName || 'Click or drag video file here'}
               </p>
             </div>
+
+            {/* Inside Tab Aspect Ratio Selector (16:9 Default) */}
+            <div className="space-y-1.5 pt-2 border-t border-neutral-800/80">
+              <label className="text-[11px] text-neutral-400 font-medium">Inside Tab Aspect Ratio</label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {TAB_RATIOS.map((ratio) => {
+                  const isSelected = state.tabAspectRatio === ratio.id;
+                  return (
+                    <button
+                      key={ratio.id}
+                      onClick={() => setState((p) => ({ ...p, tabAspectRatio: ratio.id }))}
+                      className={`py-1.5 px-2 rounded-lg text-center border transition-all ${
+                        isSelected
+                          ? 'bg-sky-950/70 border-sky-500 text-white shadow-sm'
+                          : 'bg-neutral-950 border-neutral-800/80 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <span className="text-xs font-bold block">{ratio.label}</span>
+                      <span className="text-[9px] text-neutral-500 block truncate">{ratio.sub}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Tab Size / Width Scale */}
+            <div className="space-y-1.5 pt-1">
+              <div className="flex justify-between text-xs text-neutral-400">
+                <span>Tab Scale on Canvas</span>
+                <span className="font-mono text-sky-400 font-bold">{Math.round((state.tabScale || 0.82) * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.60"
+                max="0.95"
+                step="0.02"
+                value={state.tabScale || 0.82}
+                onChange={(e) => setState((p) => ({ ...p, tabScale: parseFloat(e.target.value) }))}
+                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
+              />
+            </div>
           </div>
 
           {/* SECTION 2: Down Layer (Background Video & Alpha State) */}
@@ -500,7 +549,7 @@ export default function StudioPage() {
 
             <p className="text-[11px] text-neutral-400">
               {isTransparentAlphaActive 
-                ? 'No background video loaded: Tab is rendered with 100% Alpha Transparency.' 
+                ? 'No background video: 16:9 tab is rendered with 100% Alpha Transparency.' 
                 : 'Fills the area behind the centered macOS tab.'}
             </p>
 
@@ -715,7 +764,6 @@ export default function StudioPage() {
                     </p>
                   </div>
                 ) : (
-                  /* Format Selection if background video exists */
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-neutral-300 uppercase tracking-wider">
                       Video Format
@@ -783,6 +831,10 @@ export default function StudioPage() {
                   <div className="flex justify-between">
                     <span className="text-neutral-400">Resolution:</span>
                     <span className="font-mono text-white">1080 × 1440 (3:4 HD)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-neutral-400">Inside Tab Ratio:</span>
+                    <span className="font-mono text-sky-300">{state.tabAspectRatio}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-neutral-400">Background Layer:</span>

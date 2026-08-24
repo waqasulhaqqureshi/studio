@@ -14,6 +14,7 @@ export type TabAnimationType =
   | 'spin-360'       // 360 Spin Snap
   | 'none';          // Static Centered
 
+export type TabAspectRatio = '16:9' | '4:3' | '1:1' | '9:16' | 'auto';
 export type ExportFormat = 'mp4' | 'webm';
 
 export interface StudioState {
@@ -23,10 +24,12 @@ export interface StudioState {
   bgVideoUrl: string | null;
   bgVideoName: string;
 
-  // macOS Tab Frame Style
+  // macOS Tab Frame Style & Sizing
   macFrameStyle: MacOsFrameStyle;
   tabTitle: string;
   tabUrl: string;
+  tabAspectRatio: TabAspectRatio; // Default '16:9'
+  tabScale: number; // 0.60 to 0.95 (default 0.82)
 
   // Tab Movement & Flip Animation
   animationType: TabAnimationType;

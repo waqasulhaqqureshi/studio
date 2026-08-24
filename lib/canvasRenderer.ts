@@ -19,7 +19,6 @@ export function renderStudioFrame({
   width,
   height,
 }: RenderOptions) {
-  // Clear full canvas preserving 100% alpha transparency
   ctx.clearRect(0, 0, width, height);
 
   const baseScale = width / 1080;
@@ -37,7 +36,7 @@ export function renderStudioFrame({
   const outerRadius = isBezel ? Math.round(48 * baseScale) : 0;
 
   // -------------------------------------------------------------
-  // 1. Tablet Device Outer Bezel (Only if enabled)
+  // 1. Tablet Device Outer Bezel (if enabled)
   // -------------------------------------------------------------
   if (isBezel) {
     ctx.save();
@@ -79,8 +78,7 @@ export function renderStudioFrame({
   }
 
   // -------------------------------------------------------------
-  // 3. LAYER 1: DOWN (BACKGROUND VIDEO - ONLY DRAWN IF LOADED)
-  // If no background video is loaded, this layer is 100% TRANSPARENT!
+  // 3. LAYER 1: DOWN (BACKGROUND VIDEO)
   // -------------------------------------------------------------
   if (hasBgVideo && bgVideo) {
     ctx.save();
@@ -105,19 +103,51 @@ export function renderStudioFrame({
 
     ctx.restore();
 
-    // Subtle dark overlay only when background video exists
     ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
     ctx.fillRect(screenX, screenY, screenW, screenH);
   }
 
   // -------------------------------------------------------------
-  // 4. LAYER 2: UP (ANIMATED FLIPPING macOS TAB + CONTENT VIDEO)
-  // Everything outside this tab remains 100% alpha transparent!
+  // 4. LAYER 2: UP (16:9 / CUSTOM RATIO macOS TAB + CONTENT VIDEO)
   // -------------------------------------------------------------
-  const tabW = Math.round(screenW * 0.78);
   const headerH = Math.round(44 * baseScale);
-  const contentH = Math.round(tabW * 0.62);
-  const tabH = headerH + contentH;
+  const targetScale = state.tabScale || 0.82;
+  let tabW = Math.round(screenW * targetScale);
+  let contentH = Math.round((tabW * 9) / 16); // 16:9 Standard default
+
+  // Calculate content height based on selected aspect ratio
+  if (state.tabAspectRatio === '16:9') {
+    contentH = Math.round((tabW * 9) / 16);
+  } else if (state.tabAspectRatio === '4:3') {
+    contentH = Math.round((tabW * 3) / 4);
+  } else if (state.tabAspectRatio === '1:1') {
+    contentH = Math.round(tabW);
+  } else if (state.tabAspectRatio === '9:16') {
+    // Vertical phone format
+    const maxTabH = screenH * 0.88;
+    const rawH = (tabW * 16) / 9 + headerH;
+    if (rawH > maxTabH) {
+      tabW = Math.round(((maxTabH - headerH) * 9) / 16);
+    }
+    contentH = Math.round((tabW * 16) / 9);
+  } else if (state.tabAspectRatio === 'auto') {
+    if (tabVideo && tabVideo.videoWidth && tabVideo.videoHeight) {
+      const vRatio = tabVideo.videoWidth / tabVideo.videoHeight;
+      contentH = Math.round(tabW / vRatio);
+    } else {
+      contentH = Math.round((tabW * 9) / 16);
+    }
+  }
+
+  let tabH = headerH + contentH;
+
+  // Keep within bounds
+  if (tabH > screenH * 0.92) {
+    const scaleFactor = (screenH * 0.92) / tabH;
+    tabW = Math.round(tabW * scaleFactor);
+    contentH = Math.round(contentH * scaleFactor);
+    tabH = headerH + contentH;
+  }
 
   const tabX = screenX + (screenW - tabW) / 2;
   const tabY = screenY + (screenH - tabH) / 2;
@@ -129,7 +159,7 @@ export function renderStudioFrame({
   ctx.save();
   const animInfo = applyTabAnimation(ctx, state.animationType, state.flipInterval, state.animationSpeed, time, centerX, centerY, baseScale);
 
-  // 3D Elevation Dynamic Drop Shadow
+  // 3D Dynamic Drop Shadow
   ctx.save();
   ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
   ctx.shadowBlur = Math.max(16, (48 + animInfo.shadowElevation) * baseScale);
@@ -186,7 +216,7 @@ export function renderStudioFrame({
 
     ctx.fillStyle = '#64748b';
     ctx.font = `${Math.floor(12 * baseScale)}px sans-serif`;
-    ctx.fillText('Content video will play inside this macOS tab', tabX + tabW / 2, contentY + contentH / 2 + 18 * baseScale);
+    ctx.fillText('16:9 Content video inside macOS tab', tabX + tabW / 2, contentY + contentH / 2 + 18 * baseScale);
   }
 
   ctx.restore();
@@ -369,7 +399,6 @@ function renderMacOsHeader(
   ctx.lineTo(x + w, y + h);
   ctx.stroke();
 
-  // Traffic lights
   const dotR = 5.5 * scale;
   const startX = x + 18 * scale;
   const centerY = y + h / 2;
