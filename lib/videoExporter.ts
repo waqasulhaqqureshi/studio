@@ -1,20 +1,34 @@
-import { StudioState } from './types';
+import { StudioState, ExportFormat } from './types';
 import { renderStudioFrame } from './canvasRenderer';
 
 export interface ExportProgress {
   progress: number;
-  status: 'initializing' | 'rendering' | 'encoding' | 'completed' | 'error';
+  status: 'initializing' | 'recording' | 'encoding' | 'completed' | 'error';
   errorMessage?: string;
   blobUrl?: string;
   blobSizeMb?: string;
-  blobSizeBytes?: number;
+  elapsedSeconds?: number;
+  totalSeconds?: number;
 }
 
 export class StudioVideoExporter {
   private isCancelled = false;
+  private animId: number | null = null;
+  private timerId: any = null;
 
   public cancel() {
     this.isCancelled = true;
+    if (this.animId) cancelAnimationFrame(this.animId);
+    if (this.timerId) clearTimeout(this.timerId);
+  }
+
+  public static getExpectedSizeMb(durationSeconds: number, compress: boolean): string {
+    const dur = Math.max(2, durationSeconds || 10);
+    // Bitrates: compressed = 4.0 Mbps, uncompressed = 14.0 Mbps
+    const bitrateBps = compress ? 4000000 : 14000000;
+    const bytes = (bitrateBps * dur) / 8;
+    const mb = bytes / (1024 * 1024);
+    return `~${mb.toFixed(1)} MB`;
   }
 
   public async exportVideo(
@@ -22,12 +36,12 @@ export class StudioVideoExporter {
     bgVideo: HTMLVideoElement | null,
     tabVideo: HTMLVideoElement | null,
     onProgress: (info: ExportProgress) => void
-  ): Promise<{ blob: Blob; blobUrl: string; sizeMb: string }> {
+  ): Promise<{ blob: Blob; blobUrl: string; sizeMb: string; format: ExportFormat }> {
     this.isCancelled = false;
 
     return new Promise(async (resolve, reject) => {
       try {
-        onProgress({ progress: 5, status: 'initializing' });
+        onProgress({ progress: 2, status: 'initializing' });
 
         const width = 1080;
         const height = 1440;
@@ -36,69 +50,109 @@ export class StudioVideoExporter {
         exportCanvas.height = height;
 
         const ctx = exportCanvas.getContext('2d', { alpha: false });
-        if (!ctx) throw new Error('Canvas 2D context creation failed');
+        if (!ctx) throw new Error('Canvas context could not be created');
 
-        const canvasStream = exportCanvas.captureStream(60);
-
-        // High-efficiency VP9/H264 codec selection
-        const mimeTypes = [
-          'video/webm;codecs=vp9',
-          'video/webm;codecs=vp8',
-          'video/webm',
-          'video/mp4',
-        ];
-        let chosenMime = '';
-        for (const m of mimeTypes) {
-          if (MediaRecorder.isTypeSupported(m)) {
-            chosenMime = m;
-            break;
-          }
-        }
-
-        // Optimized dynamic bitrate compression (4.5 Mbps keeps 1080x1440 sharp without bloated size)
-        const mediaRecorder = new MediaRecorder(canvasStream, {
-          mimeType: chosenMime || undefined,
-          videoBitsPerSecond: 4500000,
-        });
-
-        const recordedChunks: Blob[] = [];
-        mediaRecorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) recordedChunks.push(e.data);
-        };
-
-        // Determine composition duration from uploaded videos
+        // Determine total duration
         let totalDuration = state.duration || 10;
-        if (tabVideo && tabVideo.duration && !isNaN(tabVideo.duration)) {
+        if (tabVideo && tabVideo.duration && !isNaN(tabVideo.duration) && tabVideo.duration > 0) {
           totalDuration = tabVideo.duration;
-        } else if (bgVideo && bgVideo.duration && !isNaN(bgVideo.duration)) {
+        } else if (bgVideo && bgVideo.duration && !isNaN(bgVideo.duration) && bgVideo.duration > 0) {
           totalDuration = bgVideo.duration;
         }
         totalDuration = Math.max(2, Math.min(300, totalDuration));
 
-        const fps = 30;
-        const totalFrames = Math.ceil(totalDuration * fps);
-        const dt = 1 / fps;
+        // Codec & Format selection
+        const requestedFormat = state.exportFormat || 'mp4';
+        const isCompress = state.compressVideo !== false;
+        const targetBitrate = isCompress ? 4200000 : 16000000;
 
-        if (bgVideo) bgVideo.currentTime = 0;
-        if (tabVideo) tabVideo.currentTime = 0;
+        let mimeType = '';
+        if (requestedFormat === 'mp4') {
+          if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
+            mimeType = 'video/mp4;codecs=avc1';
+          } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+            mimeType = 'video/mp4';
+          }
+        }
 
-        mediaRecorder.start(200);
-        onProgress({ progress: 10, status: 'rendering' });
+        if (!mimeType) {
+          if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
+            mimeType = 'video/webm;codecs=vp9';
+          } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
+            mimeType = 'video/webm;codecs=vp8';
+          } else {
+            mimeType = 'video/webm';
+          }
+        }
 
-        let frame = 0;
-        const renderLoop = async () => {
+        // Capture stream at 60 FPS
+        const canvasStream = exportCanvas.captureStream(60);
+
+        const options: MediaRecorderOptions = {
+          mimeType: mimeType || undefined,
+          videoBitsPerSecond: targetBitrate,
+        };
+
+        const mediaRecorder = new MediaRecorder(canvasStream, options);
+        const recordedChunks: Blob[] = [];
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+        };
+
+        // Reset and prepare video elements for 1:1 real-time playback
+        if (bgVideo) {
+          bgVideo.currentTime = 0;
+          bgVideo.playbackRate = 1.0;
+          bgVideo.muted = true;
+          bgVideo.loop = true;
+          await bgVideo.play().catch(() => {});
+        }
+        if (tabVideo) {
+          tabVideo.currentTime = 0;
+          tabVideo.playbackRate = 1.0;
+          tabVideo.muted = true;
+          tabVideo.loop = true;
+          await tabVideo.play().catch(() => {});
+        }
+
+        const startTime = performance.now();
+        mediaRecorder.start(100);
+
+        onProgress({
+          progress: 5,
+          status: 'recording',
+          elapsedSeconds: 0,
+          totalSeconds: totalDuration,
+        });
+
+        // Exact 1:1 Normal Speed Real-Time Recording Loop
+        const recordFrame = () => {
           if (this.isCancelled) {
             mediaRecorder.stop();
+            if (bgVideo) bgVideo.pause();
+            if (tabVideo) tabVideo.pause();
             reject(new Error('Export cancelled'));
             return;
           }
 
-          const t = frame * dt;
+          const elapsedSec = (performance.now() - startTime) / 1000;
 
-          if (frame >= totalFrames || t >= totalDuration) {
-            onProgress({ progress: 95, status: 'encoding' });
+          if (elapsedSec >= totalDuration) {
+            // Reached duration limit
+            onProgress({
+              progress: 96,
+              status: 'encoding',
+              elapsedSeconds: totalDuration,
+              totalSeconds: totalDuration,
+            });
+
+            if (bgVideo) bgVideo.pause();
+            if (tabVideo) tabVideo.pause();
+
             mediaRecorder.onstop = () => {
-              const blob = new Blob(recordedChunks, { type: chosenMime || 'video/webm' });
+              const outputMime = mimeType.includes('mp4') ? 'video/mp4' : 'video/webm';
+              const blob = new Blob(recordedChunks, { type: outputMime });
               const blobUrl = URL.createObjectURL(blob);
               const sizeMb = (blob.size / (1024 * 1024)).toFixed(2) + ' MB';
 
@@ -107,42 +161,45 @@ export class StudioVideoExporter {
                 status: 'completed',
                 blobUrl,
                 blobSizeMb: sizeMb,
-                blobSizeBytes: blob.size,
+                elapsedSeconds: totalDuration,
+                totalSeconds: totalDuration,
               });
-              resolve({ blob, blobUrl, sizeMb });
+
+              resolve({
+                blob,
+                blobUrl,
+                sizeMb,
+                format: outputMime.includes('mp4') ? 'mp4' : 'webm',
+              });
             };
+
             mediaRecorder.stop();
             return;
           }
 
-          const seeks: Promise<void>[] = [];
-          if (bgVideo && bgVideo.duration) {
-            seeks.push(seekVideo(bgVideo, t % bgVideo.duration));
-          }
-          if (tabVideo && tabVideo.duration) {
-            seeks.push(seekVideo(tabVideo, Math.min(t, tabVideo.duration)));
-          }
-
-          await Promise.all(seeks);
-
+          // Render exact current timestamp
           renderStudioFrame({
             ctx,
             state,
             bgVideo,
             tabVideo,
-            time: t,
+            time: elapsedSec,
             width,
             height,
           });
 
-          frame++;
-          const percent = Math.min(94, Math.round((frame / totalFrames) * 85) + 10);
-          onProgress({ progress: percent, status: 'rendering' });
+          const currentPercent = Math.min(95, Math.round((elapsedSec / totalDuration) * 90) + 5);
+          onProgress({
+            progress: currentPercent,
+            status: 'recording',
+            elapsedSeconds: Math.round(elapsedSec * 10) / 10,
+            totalSeconds: totalDuration,
+          });
 
-          requestAnimationFrame(renderLoop);
+          this.animId = requestAnimationFrame(recordFrame);
         };
 
-        renderLoop();
+        this.animId = requestAnimationFrame(recordFrame);
       } catch (err: any) {
         onProgress({ progress: 0, status: 'error', errorMessage: err.message });
         reject(err);
@@ -166,30 +223,11 @@ export class StudioVideoExporter {
       state,
       bgVideo,
       tabVideo,
-      time: state.currentTime,
+      time: 0,
       width: 1080,
       height: 1440,
     });
 
     return canvas.toDataURL('image/png', 1.0);
   }
-}
-
-function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
-  return new Promise((resolve) => {
-    if (Math.abs(video.currentTime - time) < 0.03) {
-      resolve();
-      return;
-    }
-    const onSeek = () => {
-      video.removeEventListener('seeked', onSeek);
-      resolve();
-    };
-    video.addEventListener('seeked', onSeek, { once: true });
-    video.currentTime = time;
-    setTimeout(() => {
-      video.removeEventListener('seeked', onSeek);
-      resolve();
-    }, 150);
-  });
 }

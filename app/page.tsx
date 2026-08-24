@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { StudioState, MacOsFrameStyle, TabAnimationType } from '@/lib/types';
+import { StudioState, MacOsFrameStyle, TabAnimationType, ExportFormat } from '@/lib/types';
 import { renderStudioFrame } from '@/lib/canvasRenderer';
 import { StudioVideoExporter, ExportProgress } from '@/lib/videoExporter';
 import { 
@@ -19,7 +19,10 @@ import {
   Activity,
   Waves,
   Zap,
-  Repeat
+  Repeat,
+  CheckSquare,
+  Square,
+  FileVideo
 } from 'lucide-react';
 
 const INITIAL_STATE: StudioState = {
@@ -37,6 +40,8 @@ const INITIAL_STATE: StudioState = {
   duration: 10,
   currentTime: 0,
   isExporting: false,
+  exportFormat: 'mp4',
+  compressVideo: true,
 };
 
 const MAC_STYLES: { id: MacOsFrameStyle; name: string; desc: string }[] = [
@@ -61,7 +66,6 @@ export default function StudioPage() {
   const [state, setState] = useState<StudioState>(INITIAL_STATE);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Sync state into a ref for the 60fps render loop (prevents 60 re-renders per second & eliminates flashing)
   const stateRef = useRef<StudioState>(state);
   useEffect(() => {
     stateRef.current = state;
@@ -155,7 +159,6 @@ export default function StudioPage() {
           bg.play().catch(() => {});
         }
 
-        // Calculate continuous time directly without triggering React re-renders
         let curTime = (performance.now() - startTime) / 1000;
         if (tab && !tab.paused && tab.duration) {
           curTime = tab.currentTime;
@@ -243,7 +246,7 @@ export default function StudioPage() {
 
     const a = document.createElement('a');
     a.href = dataUrl;
-    a.download = `macos-tab-flip-${Date.now()}.png`;
+    a.download = `macos-tab-mockup-${Date.now()}.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -294,11 +297,13 @@ export default function StudioPage() {
     if (!downloadUrl) return;
     const a = document.createElement('a');
     a.href = downloadUrl;
-    a.download = `macos-tab-studio-${Date.now()}.webm`;
+    a.download = `macos-tab-studio-${Date.now()}.${state.exportFormat}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
   };
+
+  const expectedSizeMb = StudioVideoExporter.getExpectedSizeMb(state.duration, state.compressVideo);
 
   return (
     <div className="flex flex-col h-screen w-screen bg-neutral-950 text-neutral-100 font-sans select-none overflow-hidden">
@@ -640,7 +645,7 @@ export default function StudioPage() {
         </div>
       </div>
 
-      {/* Export Modal */}
+      {/* Export Modal with Format, Compression Checkmark & Expected MBs */}
       {showExportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
@@ -660,22 +665,81 @@ export default function StudioPage() {
 
             {!state.isExporting && !downloadUrl && (
               <div className="space-y-4">
-                <div className="bg-neutral-950 p-3.5 rounded-xl border border-neutral-800 text-xs space-y-2 text-neutral-300">
+                {/* 1. Format Selection */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-neutral-300 uppercase tracking-wider">
+                    Video Format
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setState((p) => ({ ...p, exportFormat: 'mp4' }))}
+                      className={`p-2.5 rounded-xl border text-xs font-semibold transition-all flex items-center justify-between ${
+                        state.exportFormat === 'mp4'
+                          ? 'bg-sky-950/60 border-sky-500 text-white shadow-sm'
+                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <FileVideo className="w-4 h-4 text-sky-400" />
+                        <span>MP4 (Universal)</span>
+                      </div>
+                      {state.exportFormat === 'mp4' && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />}
+                    </button>
+
+                    <button
+                      onClick={() => setState((p) => ({ ...p, exportFormat: 'webm' }))}
+                      className={`p-2.5 rounded-xl border text-xs font-semibold transition-all flex items-center justify-between ${
+                        state.exportFormat === 'webm'
+                          ? 'bg-sky-950/60 border-sky-500 text-white shadow-sm'
+                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <FileVideo className="w-4 h-4 text-indigo-400" />
+                        <span>WebM (VP9)</span>
+                      </div>
+                      {state.exportFormat === 'webm' && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Compression Checkmark Option */}
+                <div
+                  onClick={() => setState((p) => ({ ...p, compressVideo: !p.compressVideo }))}
+                  className="bg-neutral-950 p-3 rounded-xl border border-neutral-800 flex items-start space-x-3 cursor-pointer hover:border-neutral-700 transition-all select-none"
+                >
+                  <div className="mt-0.5">
+                    {state.compressVideo ? (
+                      <CheckSquare className="w-4 h-4 text-sky-400" />
+                    ) : (
+                      <Square className="w-4 h-4 text-neutral-500" />
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-white block">
+                      Compress Video (Optimized for Social Media)
+                    </span>
+                    <span className="text-[11px] text-neutral-400 block mt-0.5">
+                      {state.compressVideo
+                        ? 'High-efficiency bitrate compression enabled (smaller MBs without quality loss)'
+                        : 'Maximum raw bitrate enabled (larger uncompressed file size)'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. Output Specs & Expected MBs */}
+                <div className="bg-neutral-950/90 p-3 rounded-xl border border-neutral-800 text-xs space-y-2 text-neutral-300">
                   <div className="flex justify-between">
                     <span className="text-neutral-400">Resolution:</span>
                     <span className="font-mono text-white">1080 × 1440 (3:4 HD)</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-neutral-400">Tab Animation:</span>
-                    <span className="font-mono text-sky-300 capitalize">{state.animationType.replace('-', ' ')}</span>
+                    <span className="text-neutral-400">Speed:</span>
+                    <span className="font-mono text-emerald-400">1.0x Normal Real-Time</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-neutral-400">Flip Interval:</span>
-                    <span className="font-mono text-sky-300">{state.flipInterval}s cycle</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-neutral-400">Compression:</span>
-                    <span className="font-mono text-emerald-400">VP9 High-Efficiency</span>
+                  <div className="flex justify-between border-t border-neutral-800/80 pt-1.5">
+                    <span className="text-neutral-400 font-semibold">Expected File Size:</span>
+                    <span className="font-mono text-sky-400 font-bold">{expectedSizeMb}</span>
                   </div>
                 </div>
 
@@ -684,7 +748,7 @@ export default function StudioPage() {
                   className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-sky-600/30 flex items-center justify-center space-x-2 transition-all"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Start Render</span>
+                  <span>Start Video Render</span>
                 </button>
               </div>
             )}
@@ -693,8 +757,10 @@ export default function StudioPage() {
               <div className="py-6 text-center space-y-4">
                 <Loader2 className="w-8 h-8 mx-auto text-sky-400 animate-spin" />
                 <div>
-                  <h4 className="font-bold text-sm text-white">Rendering & Compressing...</h4>
-                  <p className="text-xs text-neutral-400 mt-1">Exporting frame-by-frame with 3D flip animation</p>
+                  <h4 className="font-bold text-sm text-white">Rendering at 1.0x Normal Speed...</h4>
+                  <p className="text-xs text-neutral-400 mt-1">
+                    Recording {exportProgress.elapsedSeconds || 0}s / {exportProgress.totalSeconds || state.duration}s
+                  </p>
                 </div>
                 <div className="w-full h-2.5 bg-neutral-800 rounded-full overflow-hidden">
                   <div
@@ -712,10 +778,10 @@ export default function StudioPage() {
                 <div>
                   <h4 className="font-bold text-sm text-white">Render Completed!</h4>
                   {finalSizeMb && (
-                    <div className="mt-2 inline-flex items-center space-x-1.5 bg-emerald-950/60 border border-emerald-500/40 px-3 py-1 rounded-full">
-                      <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                    <div className="mt-2 inline-flex items-center space-x-1.5 bg-emerald-950/60 border border-emerald-500/40 px-3.5 py-1.5 rounded-full">
+                      <HardDrive className="w-4 h-4 text-emerald-400" />
                       <span className="text-xs font-bold text-emerald-300 font-mono">
-                        Total File Size: {finalSizeMb}
+                        Final File Size: {finalSizeMb}
                       </span>
                     </div>
                   )}
@@ -727,7 +793,7 @@ export default function StudioPage() {
                     className="py-2.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center justify-center space-x-1.5 shadow-md shadow-sky-600/20"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Download Video</span>
+                    <span>Download {state.exportFormat.toUpperCase()}</span>
                   </button>
                   <button
                     onClick={() => {

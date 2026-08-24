@@ -14,6 +14,8 @@ export type TabAnimationType =
   | 'spin-360'       // 360 Spin Snap
   | 'none';          // Static Centered
 
+export type ExportFormat = 'mp4' | 'webm';
+
 export interface StudioState {
   // Video sources
   tabVideoUrl: string | null;
@@ -28,8 +30,8 @@ export interface StudioState {
 
   // Tab Movement & Flip Animation
   animationType: TabAnimationType;
-  flipInterval: number; // in seconds (e.g. 3s, range 1 to 10s)
-  animationSpeed: number; // 0.5x to 2x (default 1.0)
+  flipInterval: number; // in seconds
+  animationSpeed: number;
 
   // Device Bezel
   showTabletBezel: boolean;
@@ -38,4 +40,8 @@ export interface StudioState {
   duration: number;
   currentTime: number;
   isExporting: boolean;
+
+  // Export Settings
+  exportFormat: ExportFormat;
+  compressVideo: boolean;
 }
