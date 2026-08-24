@@ -41,7 +41,7 @@ const INITIAL_STATE: StudioState = {
   duration: 10,
   currentTime: 0,
   isExporting: false,
-  exportFormat: 'mp4',
+  exportFormat: 'mov', // QuickTime MOV default for alpha ProRes readiness
 };
 
 const MAC_STYLES: { id: MacOsFrameStyle; name: string; desc: string }[] = [
@@ -306,7 +306,7 @@ export default function StudioPage() {
   const handleDownloadExportedVideo = () => {
     if (!downloadUrl) return;
     const isAlpha = !state.bgVideoUrl;
-    const ext = isAlpha ? 'webm' : state.exportFormat;
+    const ext = isAlpha ? (state.exportFormat === 'mov' ? 'mov' : 'webm') : state.exportFormat;
     const a = document.createElement('a');
     a.href = downloadUrl;
     a.download = `macos-tab-studio-${isAlpha ? 'alpha-transparent-' : ''}${Date.now()}.${ext}`;
@@ -354,7 +354,7 @@ export default function StudioPage() {
               {isTransparentAlphaActive && (
                 <span className="hidden sm:inline-flex items-center space-x-1 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                   <Sparkles className="w-3 h-3" />
-                  <span>Alpha Transparent</span>
+                  <span>Alpha Transparent (MOV / WebM)</span>
                 </span>
               )}
             </div>
@@ -448,7 +448,7 @@ export default function StudioPage() {
             <input
               ref={tabFileInputRef}
               type="file"
-              accept="video/*"
+              accept="video/mp4,video/quicktime,video/webm,video/*,.mov,.mp4,.webm"
               onChange={(e) => e.target.files?.[0] && handleTabFileUpload(e.target.files[0])}
               className="hidden"
             />
@@ -472,7 +472,7 @@ export default function StudioPage() {
                 {state.tabVideoName ? 'Replace Tab Video' : 'Upload Tab Content Video'}
               </p>
               <p className="text-[10px] text-neutral-400 mt-0.5 truncate max-w-[240px] mx-auto font-mono">
-                {state.tabVideoName || 'Click or drag video file here'}
+                {state.tabVideoName || 'Click or drag MP4 / MOV / WebM'}
               </p>
             </div>
 
@@ -551,7 +551,7 @@ export default function StudioPage() {
             <input
               ref={bgFileInputRef}
               type="file"
-              accept="video/*"
+              accept="video/mp4,video/quicktime,video/webm,video/*,.mov,.mp4,.webm"
               onChange={(e) => e.target.files?.[0] && handleBgFileUpload(e.target.files[0])}
               className="hidden"
             />
@@ -724,7 +724,7 @@ export default function StudioPage() {
         </div>
       </div>
 
-      {/* Export Modal with Native Quality & Alpha Transparency */}
+      {/* Export Modal with MOV, MP4, WebM & Alpha Transparency */}
       {showExportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
@@ -744,55 +744,65 @@ export default function StudioPage() {
 
             {!state.isExporting && !downloadUrl && (
               <div className="space-y-4">
-                {/* Alpha Transparency Notification */}
-                {isTransparentAlphaActive ? (
+                {/* Alpha Transparency Banner */}
+                {isTransparentAlphaActive && (
                   <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 text-xs space-y-1">
                     <div className="flex items-center space-x-1.5 text-emerald-300 font-bold">
                       <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
                       <span>Native Alpha Transparency (32-bit RGBA)</span>
                     </div>
                     <p className="text-[11px] text-emerald-200/80">
-                      The output is encoded directly in <strong>Transparent WebM (VP9 RGBA)</strong> with zero background. Ready to overlay in Premiere, After Effects, DaVinci Resolve, Final Cut, and Web.
+                      The output preserves a transparent background ready for <strong>Premiere Pro, After Effects, Final Cut, DaVinci Resolve, and Web</strong>.
                     </p>
                   </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-neutral-300 uppercase tracking-wider">
-                      Video Format
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => setState((p) => ({ ...p, exportFormat: 'mp4' }))}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold transition-all flex items-center justify-between ${
-                          state.exportFormat === 'mp4'
-                            ? 'bg-sky-950/60 border-sky-500 text-white shadow-sm'
-                            : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
-                        }`}
-                      >
-                        <div className="flex items-center space-x-2">
-                          <FileVideo className="w-4 h-4 text-sky-400" />
-                          <span>MP4 (Universal)</span>
-                        </div>
-                        {state.exportFormat === 'mp4' && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />}
-                      </button>
-
-                      <button
-                        onClick={() => setState((p) => ({ ...p, exportFormat: 'webm' }))}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold transition-all flex items-center justify-between ${
-                          state.exportFormat === 'webm'
-                            ? 'bg-sky-950/60 border-sky-500 text-white shadow-sm'
-                            : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
-                        }`}
-                      >
-                        <div className="flex items-center space-x-2">
-                          <FileVideo className="w-4 h-4 text-indigo-400" />
-                          <span>WebM (VP9)</span>
-                        </div>
-                        {state.exportFormat === 'webm' && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />}
-                      </button>
-                    </div>
-                  </div>
                 )}
+
+                {/* Format Selection (MOV, MP4, WebM) */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-neutral-300 uppercase tracking-wider">
+                    Select Output Format
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => setState((p) => ({ ...p, exportFormat: 'mov' }))}
+                      className={`p-2 rounded-xl border text-center transition-all ${
+                        state.exportFormat === 'mov'
+                          ? 'bg-sky-950/70 border-sky-500 text-white shadow-sm'
+                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <FileVideo className="w-4 h-4 mx-auto text-sky-400 mb-1" />
+                      <span className="text-xs font-bold block">MOV</span>
+                      <span className="text-[9px] text-neutral-500 block">QuickTime ProRes</span>
+                    </button>
+
+                    <button
+                      onClick={() => setState((p) => ({ ...p, exportFormat: 'mp4' }))}
+                      className={`p-2 rounded-xl border text-center transition-all ${
+                        state.exportFormat === 'mp4'
+                          ? 'bg-sky-950/70 border-sky-500 text-white shadow-sm'
+                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <FileVideo className="w-4 h-4 mx-auto text-indigo-400 mb-1" />
+                      <span className="text-xs font-bold block">MP4</span>
+                      <span className="text-[9px] text-neutral-500 block">Universal H.264</span>
+                    </button>
+
+                    <button
+                      onClick={() => setState((p) => ({ ...p, exportFormat: 'webm' }))}
+                      className={`p-2 rounded-xl border text-center transition-all ${
+                        state.exportFormat === 'webm'
+                          ? 'bg-sky-950/70 border-sky-500 text-white shadow-sm'
+                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <FileVideo className="w-4 h-4 mx-auto text-emerald-400 mb-1" />
+                      <span className="text-xs font-bold block">WebM</span>
+                      <span className="text-[9px] text-neutral-500 block">VP9 Alpha RGBA</span>
+                    </button>
+                  </div>
+                </div>
 
                 {/* Output Specs */}
                 <div className="bg-neutral-950/90 p-3.5 rounded-xl border border-neutral-800 text-xs space-y-2 text-neutral-300">
@@ -802,7 +812,7 @@ export default function StudioPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-neutral-400">Quality:</span>
-                    <span className="font-mono text-emerald-400">Native Lossless (60 FPS Raw)</span>
+                    <span className="font-mono text-emerald-400">Native Lossless (60 FPS)</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-neutral-400">Background:</span>
@@ -817,7 +827,7 @@ export default function StudioPage() {
                   className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-sky-600/30 flex items-center justify-center space-x-2 transition-all"
                 >
                   <Download className="w-4 h-4" />
-                  <span>{isTransparentAlphaActive ? 'Start Transparent Render' : 'Start Video Render'}</span>
+                  <span>Start Native Render</span>
                 </button>
               </div>
             )}
@@ -869,7 +879,7 @@ export default function StudioPage() {
                     className="py-2.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center justify-center space-x-1.5 shadow-md shadow-sky-600/20"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Download {isTransparentAlphaActive ? 'Transparent Video' : state.exportFormat.toUpperCase()}</span>
+                    <span>Download {state.exportFormat.toUpperCase()}</span>
                   </button>
                   <button
                     onClick={() => {

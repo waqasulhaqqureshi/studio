@@ -49,7 +49,6 @@ export class StudioVideoExporter {
         exportCanvas.width = width;
         exportCanvas.height = height;
 
-        // Native Alpha Context (Pure 32-bit RGBA)
         const isAlphaTransparent = !state.bgVideoUrl;
         const ctx = exportCanvas.getContext('2d', { alpha: true });
         if (!ctx) throw new Error('Canvas 2D context creation failed');
@@ -114,14 +113,21 @@ export class StudioVideoExporter {
         }
         totalDuration = Math.max(2, Math.min(300, totalDuration));
 
-        // Codec selection with maximum native quality
-        let requestedFormat = state.exportFormat || (isAlphaTransparent ? 'webm' : 'mp4');
-        if (isAlphaTransparent) {
-          requestedFormat = 'webm';
-        }
+        // Format & Codec selection
+        const requestedFormat = state.exportFormat || (isAlphaTransparent ? 'mov' : 'mp4');
 
         let mimeType = '';
-        if (requestedFormat === 'webm' || isAlphaTransparent) {
+        if (requestedFormat === 'mov') {
+          if (MediaRecorder.isTypeSupported('video/quicktime')) {
+            mimeType = 'video/quicktime';
+          } else if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
+            mimeType = 'video/mp4;codecs=avc1';
+          } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
+            mimeType = 'video/webm;codecs=vp9';
+          } else {
+            mimeType = 'video/mp4';
+          }
+        } else if (requestedFormat === 'webm' || isAlphaTransparent) {
           if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
             mimeType = 'video/webm;codecs=vp9';
           } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
@@ -130,6 +136,7 @@ export class StudioVideoExporter {
             mimeType = 'video/webm';
           }
         } else {
+          // mp4
           if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
             mimeType = 'video/mp4;codecs=avc1';
           } else if (MediaRecorder.isTypeSupported('video/mp4')) {
@@ -139,7 +146,6 @@ export class StudioVideoExporter {
           }
         }
 
-        // Native uncompressed stream at 60 FPS (25 Mbps raw bitrate for pristine native visual clarity)
         const canvasStream = exportCanvas.captureStream(60);
         const mediaRecorder = new MediaRecorder(canvasStream, {
           mimeType: mimeType || undefined,
@@ -203,7 +209,15 @@ export class StudioVideoExporter {
             if (bgVid) bgVid.pause();
 
             mediaRecorder.onstop = () => {
-              const outputMime = isAlphaTransparent ? 'video/webm' : (mimeType.includes('mp4') ? 'video/mp4' : 'video/webm');
+              let outputMime = 'video/mp4';
+              if (requestedFormat === 'mov') {
+                outputMime = 'video/quicktime';
+              } else if (requestedFormat === 'webm' || isAlphaTransparent) {
+                outputMime = 'video/webm';
+              } else {
+                outputMime = 'video/mp4';
+              }
+
               const blob = new Blob(recordedChunks, { type: outputMime });
               const blobUrl = URL.createObjectURL(blob);
               const sizeMb = (blob.size / (1024 * 1024)).toFixed(2) + ' MB';
@@ -222,7 +236,7 @@ export class StudioVideoExporter {
                 blob,
                 blobUrl,
                 sizeMb,
-                format: isAlphaTransparent ? 'webm' : (outputMime.includes('mp4') ? 'mp4' : 'webm'),
+                format: requestedFormat,
                 hasAlpha: isAlphaTransparent,
               });
             };

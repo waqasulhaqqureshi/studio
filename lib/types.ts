@@ -15,7 +15,7 @@ export type TabAnimationType =
   | 'none';          // Static Centered
 
 export type TabAspectRatio = '16:9' | '4:3' | '1:1' | '9:16' | 'auto';
-export type ExportFormat = 'mp4' | 'webm';
+export type ExportFormat = 'mp4' | 'webm' | 'mov';
 
 export interface StudioState {
   // Video sources
