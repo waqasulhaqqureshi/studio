@@ -61,6 +61,12 @@ export default function StudioPage() {
   const [state, setState] = useState<StudioState>(INITIAL_STATE);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Sync state into a ref for the 60fps render loop (prevents 60 re-renders per second & eliminates flashing)
+  const stateRef = useRef<StudioState>(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   // Export state
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
@@ -124,10 +130,8 @@ export default function StudioPage() {
     }
   }, [state.isExporting]);
 
-  // 60 FPS Canvas Render Loop
+  // Ultra-Smooth 60 FPS Decoupled Canvas Loop (Zero Blink, Zero Flash)
   useEffect(() => {
-    if (state.isExporting) return;
-
     let animId: number;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -135,58 +139,47 @@ export default function StudioPage() {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
-    let lastTime = performance.now();
+    const startTime = performance.now();
 
-    const loop = (now: number) => {
-      const tab = tabVideoRef.current;
-      const bg = bgVideoRef.current;
+    const loop = () => {
+      const currentState = stateRef.current;
 
-      let curTime = state.currentTime;
+      if (!currentState.isExporting) {
+        const tab = tabVideoRef.current;
+        const bg = bgVideoRef.current;
 
-      if (tab && tab.src && tab.paused && !tab.error && !state.isExporting) {
-        tab.play().catch(() => {});
+        if (tab && tab.src && tab.paused && !tab.error) {
+          tab.play().catch(() => {});
+        }
+        if (bg && bg.src && bg.paused && !bg.error) {
+          bg.play().catch(() => {});
+        }
+
+        // Calculate continuous time directly without triggering React re-renders
+        let curTime = (performance.now() - startTime) / 1000;
+        if (tab && !tab.paused && tab.duration) {
+          curTime = tab.currentTime;
+        } else if (bg && !bg.paused && bg.duration) {
+          curTime = bg.currentTime;
+        }
+
+        renderStudioFrame({
+          ctx,
+          state: currentState,
+          bgVideo: bgVideoRef.current,
+          tabVideo: tabVideoRef.current,
+          time: curTime,
+          width: canvas.width,
+          height: canvas.height,
+        });
       }
-      if (bg && bg.src && bg.paused && !bg.error && !state.isExporting) {
-        bg.play().catch(() => {});
-      }
 
-      if (tab && !tab.paused && tab.duration) {
-        curTime = tab.currentTime;
-      } else if (bg && !bg.paused && bg.duration) {
-        curTime = bg.currentTime;
-      } else {
-        const delta = (now - lastTime) / 1000;
-        curTime = (state.currentTime + delta) % (state.duration || 10);
-      }
-
-      setState((prev) => ({ ...prev, currentTime: curTime }));
-
-      renderStudioFrame({
-        ctx,
-        state,
-        bgVideo: bgVideoRef.current,
-        tabVideo: tabVideoRef.current,
-        time: curTime,
-        width: canvas.width,
-        height: canvas.height,
-      });
-
-      lastTime = now;
       animId = requestAnimationFrame(loop);
     };
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [
-    state.isExporting, 
-    state.macFrameStyle, 
-    state.showTabletBezel, 
-    state.tabTitle, 
-    state.tabUrl, 
-    state.animationType, 
-    state.flipInterval, 
-    state.animationSpeed
-  ]);
+  }, []);
 
   // Duration sync
   const handleTabLoadedMetadata = useCallback(() => {
@@ -245,7 +238,7 @@ export default function StudioPage() {
   // HD Poster Screenshot
   const handleCaptureScreenshot = () => {
     const exporter = new StudioVideoExporter();
-    const dataUrl = exporter.captureStillFrame(state, bgVideoRef.current, tabVideoRef.current);
+    const dataUrl = exporter.captureStillFrame(stateRef.current, bgVideoRef.current, tabVideoRef.current);
     if (!dataUrl) return;
 
     const a = document.createElement('a');
@@ -268,7 +261,7 @@ export default function StudioPage() {
 
     try {
       const result = await exporter.exportVideo(
-        state,
+        stateRef.current,
         bgVideoRef.current,
         tabVideoRef.current,
         (p) => {

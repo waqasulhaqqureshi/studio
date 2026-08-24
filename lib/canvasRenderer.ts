@@ -19,8 +19,6 @@ export function renderStudioFrame({
   width,
   height,
 }: RenderOptions) {
-  ctx.clearRect(0, 0, width, height);
-
   const baseScale = width / 1080;
   const isBezel = state.showTabletBezel;
 
@@ -83,7 +81,7 @@ export function renderStudioFrame({
   ctx.filter = `blur(${6 * baseScale}px)`;
 
   let bgDrawn = false;
-  if (bgVideo && bgVideo.readyState >= 2 && !bgVideo.error) {
+  if (bgVideo && (bgVideo.readyState >= 1 || bgVideo.currentTime > 0) && !bgVideo.error) {
     try {
       const vWidth = bgVideo.videoWidth || 1920;
       const vHeight = bgVideo.videoHeight || 1080;
@@ -103,7 +101,8 @@ export function renderStudioFrame({
     }
   }
 
-  if (!bgDrawn) {
+  // Only draw fallback if no video is selected at all
+  if (!bgDrawn && !state.bgVideoUrl) {
     const grad = ctx.createLinearGradient(screenX, screenY, screenX + screenW, screenY + screenH);
     grad.addColorStop(0, '#1e293b');
     grad.addColorStop(0.5, '#0f172a');
@@ -137,7 +136,7 @@ export function renderStudioFrame({
   const centerX = tabX + tabW / 2;
   const centerY = tabY + tabH / 2;
 
-  // Apply User-Selected Tab Movement & 3D Flip Transformation
+  // Apply Tab Movement & 3D Flip Transformation
   ctx.save();
   const animInfo = applyTabAnimation(ctx, state.animationType, state.flipInterval, state.animationSpeed, time, centerX, centerY, baseScale);
 
@@ -166,7 +165,7 @@ export function renderStudioFrame({
   ctx.fillRect(tabX, contentY, tabW, contentH);
 
   let tabDrawn = false;
-  if (tabVideo && tabVideo.readyState >= 2 && !tabVideo.error) {
+  if (tabVideo && (tabVideo.readyState >= 1 || tabVideo.currentTime > 0) && !tabVideo.error) {
     try {
       const vWidth = tabVideo.videoWidth || 1920;
       const vHeight = tabVideo.videoHeight || 1080;
@@ -186,7 +185,8 @@ export function renderStudioFrame({
     }
   }
 
-  if (!tabDrawn) {
+  // Only draw placeholder text if no video source is selected at all
+  if (!tabDrawn && !state.tabVideoUrl) {
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(tabX, contentY, tabW, contentH);
 
@@ -197,7 +197,7 @@ export function renderStudioFrame({
 
     ctx.fillStyle = '#64748b';
     ctx.font = `${Math.floor(12 * baseScale)}px sans-serif`;
-    ctx.fillText('Content video flips inside this macOS tab', tabX + tabW / 2, contentY + contentH / 2 + 18 * baseScale);
+    ctx.fillText('Content video will play inside this macOS tab', tabX + tabW / 2, contentY + contentH / 2 + 18 * baseScale);
   }
 
   ctx.restore();
@@ -239,7 +239,6 @@ function applyTabAnimation(
       const cycle = adjustedTime % interval;
       if (cycle < flipDuration) {
         const p = cycle / flipDuration;
-        // Smooth ease-in-out quintic
         const ease = p < 0.5 ? 16 * Math.pow(p, 5) : 1 - Math.pow(-2 * p + 2, 5) / 2;
         const angle = ease * Math.PI * 2;
         const scaleX = Math.cos(angle);
@@ -277,10 +276,9 @@ function applyTabAnimation(
     }
 
     case 'floating-wave': {
-      // Continuous smooth floating drift and subtle perspective tilt
       const floatY = Math.sin((adjustedTime * 2 * Math.PI) / interval) * 16 * scale;
       const floatX = Math.cos((adjustedTime * Math.PI) / interval) * 6 * scale;
-      const tilt = Math.sin((adjustedTime * 2 * Math.PI) / interval) * 0.03; // ~1.8 deg tilt
+      const tilt = Math.sin((adjustedTime * 2 * Math.PI) / interval) * 0.03;
 
       ctx.translate(centerX + floatX, centerY + floatY);
       ctx.rotate(tilt);
@@ -292,7 +290,6 @@ function applyTabAnimation(
     }
 
     case 'pulse-bounce': {
-      // Periodic rhythmic pop bounce
       const cycle = adjustedTime % interval;
       if (cycle < 0.6) {
         const p = cycle / 0.6;
@@ -309,7 +306,6 @@ function applyTabAnimation(
     }
 
     case 'slide-snap': {
-      // Slide right and snap back
       const slideDuration = 0.85;
       const cycle = adjustedTime % interval;
       if (cycle < slideDuration) {
@@ -326,12 +322,10 @@ function applyTabAnimation(
     }
 
     case 'spin-360': {
-      // Elastic 360 spin
       const spinDuration = 0.95;
       const cycle = adjustedTime % interval;
       if (cycle < spinDuration) {
         const p = cycle / spinDuration;
-        // Elastic spring easing
         const c4 = (2 * Math.PI) / 3;
         const ease = p === 0 ? 0 : p === 1 ? 1 : Math.pow(2, -10 * p) * Math.sin((p * 10 - 0.75) * c4) + 1;
         const rot = ease * Math.PI * 2;
