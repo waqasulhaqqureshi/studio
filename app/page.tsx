@@ -33,7 +33,7 @@ const INITIAL_STATE: StudioState = {
   animationType: '3d-flip-h',
   flipInterval: 3.0,
   animationSpeed: 1.0,
-  showTabletBezel: true,
+  showTabletBezel: false,
   duration: 10,
   currentTime: 0,
   isExporting: false,
