@@ -37,53 +37,12 @@ export class StudioVideoExporter {
         const ctx = exportCanvas.getContext('2d', { alpha: false });
         if (!ctx) throw new Error('Canvas 2D context creation failed');
 
-        // Prepare Audio Context & Mixer
-        let audioStream: MediaStream | null = null;
-        let audioContext: AudioContext | null = null;
-
-        try {
-          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-          audioContext = new AudioCtx();
-          const dest = audioContext.createMediaStreamDestination();
-          const masterGain = audioContext.createGain();
-          masterGain.gain.value = state.masterVolume;
-          masterGain.connect(dest);
-
-          if (bgVideo && !bgVideo.error) {
-            try {
-              const bgSrc = audioContext.createMediaElementSource(bgVideo);
-              const bgGain = audioContext.createGain();
-              bgGain.gain.value = state.isBgMuted ? 0 : state.bgVolume;
-              bgSrc.connect(bgGain);
-              bgGain.connect(masterGain);
-            } catch {}
-          }
-
-          if (tabVideo && !tabVideo.error) {
-            try {
-              const tabSrc = audioContext.createMediaElementSource(tabVideo);
-              const tabGain = audioContext.createGain();
-              tabGain.gain.value = state.isTabMuted ? 0 : state.tabVolume;
-              tabSrc.connect(tabGain);
-              tabGain.connect(masterGain);
-            } catch {}
-          }
-
-          audioStream = dest.stream;
-        } catch (e) {
-          console.warn('Audio mixer skipped:', e);
-        }
-
+        // Pure video stream (no audio)
         const canvasStream = exportCanvas.captureStream(60);
-        const combinedStream = new MediaStream();
-        canvasStream.getVideoTracks().forEach((t) => combinedStream.addTrack(t));
-        if (audioStream) {
-          audioStream.getAudioTracks().forEach((t) => combinedStream.addTrack(t));
-        }
 
         const mimeTypes = [
-          'video/webm;codecs=vp9,opus',
-          'video/webm;codecs=vp8,opus',
+          'video/webm;codecs=vp9',
+          'video/webm;codecs=vp8',
           'video/webm',
           'video/mp4',
         ];
@@ -95,7 +54,7 @@ export class StudioVideoExporter {
           }
         }
 
-        const mediaRecorder = new MediaRecorder(combinedStream, {
+        const mediaRecorder = new MediaRecorder(canvasStream, {
           mimeType: chosenMime || undefined,
           videoBitsPerSecond: 8000000,
         });
@@ -105,7 +64,15 @@ export class StudioVideoExporter {
           if (e.data && e.data.size > 0) recordedChunks.push(e.data);
         };
 
-        const totalDuration = Math.max(2, state.duration || 10);
+        // Determine composition duration from uploaded videos
+        let totalDuration = state.duration || 10;
+        if (tabVideo && tabVideo.duration && !isNaN(tabVideo.duration)) {
+          totalDuration = tabVideo.duration;
+        } else if (bgVideo && bgVideo.duration && !isNaN(bgVideo.duration)) {
+          totalDuration = bgVideo.duration;
+        }
+        totalDuration = Math.max(2, Math.min(300, totalDuration));
+
         const fps = 30;
         const totalFrames = Math.ceil(totalDuration * fps);
         const dt = 1 / fps;
@@ -120,7 +87,6 @@ export class StudioVideoExporter {
         const renderLoop = async () => {
           if (this.isCancelled) {
             mediaRecorder.stop();
-            if (audioContext) audioContext.close().catch(() => {});
             reject(new Error('Export cancelled'));
             return;
           }
@@ -132,7 +98,6 @@ export class StudioVideoExporter {
             mediaRecorder.onstop = () => {
               const blob = new Blob(recordedChunks, { type: chosenMime || 'video/webm' });
               const blobUrl = URL.createObjectURL(blob);
-              if (audioContext) audioContext.close().catch(() => {});
 
               onProgress({
                 progress: 100,

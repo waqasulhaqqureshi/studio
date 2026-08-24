@@ -7,44 +7,33 @@ import { StudioVideoExporter, ExportProgress } from '@/lib/videoExporter';
 import { 
   Upload, 
   Film, 
-  Play, 
-  Pause, 
   RotateCcw, 
   Download, 
   Camera, 
-  Volume2, 
-  VolumeX, 
-  Layers, 
   Tablet, 
-  Sparkles, 
   CheckCircle2, 
   Sliders, 
   FileVideo,
   X,
-  Loader2
+  Loader2,
+  Trash2
 } from 'lucide-react';
 
 const INITIAL_STATE: StudioState = {
-  tabVideoUrl: '/recording.mp4',
-  tabVideoName: 'Recording 2026-08-24 094643.mp4',
-  bgVideoUrl: '/recording.mp4',
-  bgVideoName: 'Recording 2026-08-24 094643.mp4',
-  isPlaying: false,
-  currentTime: 0,
-  duration: 15,
+  tabVideoUrl: null,
+  tabVideoName: '',
+  bgVideoUrl: null,
+  bgVideoName: '',
   tabWidthScale: 0.76,
   tabRadius: 18,
   tabShadow: 'deep',
   tabBorder: true,
-  tabVolume: 1.0,
-  isTabMuted: false,
   tabStyle: 'minimal-card',
   bgBlur: 6,
-  bgDim: 0.2,
-  bgVolume: 0.3,
-  isBgMuted: false,
+  bgDim: 0.15,
   showTabletBezel: true,
-  masterVolume: 1.0,
+  duration: 10,
+  currentTime: 0,
 };
 
 export default function StudioPage() {
@@ -73,52 +62,34 @@ export default function StudioPage() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Sync video URLs
+  // Sync video URLs and automatically play them continuously
   useEffect(() => {
-    if (bgVideoRef.current && state.bgVideoUrl) {
-      if (bgVideoRef.current.src !== state.bgVideoUrl) {
-        bgVideoRef.current.src = state.bgVideoUrl;
-        bgVideoRef.current.load();
+    const bg = bgVideoRef.current;
+    if (bg && state.bgVideoUrl) {
+      if (bg.src !== state.bgVideoUrl) {
+        bg.src = state.bgVideoUrl;
+        bg.muted = true;
+        bg.loop = true;
+        bg.load();
+        bg.play().catch(() => {});
       }
     }
   }, [state.bgVideoUrl]);
 
   useEffect(() => {
-    if (tabVideoRef.current && state.tabVideoUrl) {
-      if (tabVideoRef.current.src !== state.tabVideoUrl) {
-        tabVideoRef.current.src = state.tabVideoUrl;
-        tabVideoRef.current.load();
+    const tab = tabVideoRef.current;
+    if (tab && state.tabVideoUrl) {
+      if (tab.src !== state.tabVideoUrl) {
+        tab.src = state.tabVideoUrl;
+        tab.muted = true;
+        tab.loop = true;
+        tab.load();
+        tab.play().catch(() => {});
       }
     }
   }, [state.tabVideoUrl]);
 
-  // Sync Play / Pause
-  useEffect(() => {
-    const bg = bgVideoRef.current;
-    const tab = tabVideoRef.current;
-
-    if (state.isPlaying) {
-      if (bg && bg.paused && !bg.error) bg.play().catch(() => {});
-      if (tab && tab.paused && !tab.error) tab.play().catch(() => {});
-    } else {
-      if (bg && !bg.paused) bg.pause();
-      if (tab && !tab.paused) tab.pause();
-    }
-  }, [state.isPlaying]);
-
-  // Sync Audio levels
-  useEffect(() => {
-    if (bgVideoRef.current) {
-      bgVideoRef.current.muted = state.isBgMuted;
-      bgVideoRef.current.volume = state.bgVolume * state.masterVolume;
-    }
-    if (tabVideoRef.current) {
-      tabVideoRef.current.muted = state.isTabMuted;
-      tabVideoRef.current.volume = state.tabVolume * state.masterVolume;
-    }
-  }, [state.bgVolume, state.isBgMuted, state.tabVolume, state.isTabMuted, state.masterVolume]);
-
-  // Main 60 FPS Canvas Render Loop
+  // Main 60 FPS Canvas Render Loop (Always continuously running)
   useEffect(() => {
     let animId: number;
     const canvas = canvasRef.current;
@@ -130,40 +101,36 @@ export default function StudioPage() {
     let lastTime = performance.now();
 
     const loop = (now: number) => {
-      if (state.isPlaying) {
-        const tab = tabVideoRef.current;
-        const bg = bgVideoRef.current;
+      const tab = tabVideoRef.current;
+      const bg = bgVideoRef.current;
 
-        let curTime = state.currentTime;
+      let curTime = state.currentTime;
 
-        if (tab && !tab.paused && tab.duration) {
-          curTime = tab.currentTime;
-          if (tab.ended) {
-            tab.currentTime = 0;
-            tab.play().catch(() => {});
-          }
-        } else if (bg && !bg.paused && bg.duration) {
-          curTime = bg.currentTime;
-        } else {
-          const delta = (now - lastTime) / 1000;
-          curTime = (state.currentTime + delta) % (state.duration || 15);
-        }
-
-        if (curTime >= state.duration) {
-          curTime = 0;
-          if (tab) tab.currentTime = 0;
-          if (bg) bg.currentTime = 0;
-        }
-
-        setState((prev) => ({ ...prev, currentTime: curTime }));
+      // Keep videos playing automatically
+      if (tab && tab.src && tab.paused && !tab.error) {
+        tab.play().catch(() => {});
       }
+      if (bg && bg.src && bg.paused && !bg.error) {
+        bg.play().catch(() => {});
+      }
+
+      if (tab && !tab.paused && tab.duration) {
+        curTime = tab.currentTime;
+      } else if (bg && !bg.paused && bg.duration) {
+        curTime = bg.currentTime;
+      } else {
+        const delta = (now - lastTime) / 1000;
+        curTime = (state.currentTime + delta) % (state.duration || 10);
+      }
+
+      setState((prev) => ({ ...prev, currentTime: curTime }));
 
       renderStudioFrame({
         ctx,
         state,
         bgVideo: bgVideoRef.current,
         tabVideo: tabVideoRef.current,
-        time: state.currentTime,
+        time: curTime,
         width: canvas.width,
         height: canvas.height,
       });
@@ -178,9 +145,18 @@ export default function StudioPage() {
 
   // Update duration when tab video metadata is loaded
   const handleTabLoadedMetadata = useCallback(() => {
-    if (tabVideoRef.current && tabVideoRef.current.duration) {
-      const dur = tabVideoRef.current.duration;
+    const tab = tabVideoRef.current;
+    if (tab && tab.duration && !isNaN(tab.duration)) {
+      const dur = tab.duration;
       setState((prev) => ({ ...prev, duration: Math.max(1, Math.round(dur * 10) / 10) }));
+      tab.play().catch(() => {});
+    }
+  }, []);
+
+  const handleBgLoadedMetadata = useCallback(() => {
+    const bg = bgVideoRef.current;
+    if (bg && bg.duration && !isNaN(bg.duration)) {
+      bg.play().catch(() => {});
     }
   }, []);
 
@@ -191,7 +167,6 @@ export default function StudioPage() {
       ...prev,
       tabVideoUrl: url,
       tabVideoName: file.name,
-      isPlaying: false,
       currentTime: 0,
     }));
     showToast(`Tab content video loaded: ${file.name}`);
@@ -203,35 +178,31 @@ export default function StudioPage() {
       ...prev,
       bgVideoUrl: url,
       bgVideoName: file.name,
-      isPlaying: false,
       currentTime: 0,
     }));
     showToast(`Background video loaded: ${file.name}`);
   };
 
-  // Keyboard shortcut (Space = Play/Pause)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !(e.target instanceof HTMLInputElement)) {
-        e.preventDefault();
-        setState((prev) => ({ ...prev, isPlaying: !prev.isPlaying }));
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  const handleRemoveTabVideo = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setState((prev) => ({
+      ...prev,
+      tabVideoUrl: null,
+      tabVideoName: '',
+    }));
+    if (tabVideoRef.current) tabVideoRef.current.src = '';
+    showToast('Tab video removed');
+  };
 
-  // Scrubber Drag
-  const handleScrubberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const targetTime = parseFloat(e.target.value);
-    setState((prev) => ({ ...prev, currentTime: targetTime }));
-
-    if (bgVideoRef.current && bgVideoRef.current.duration) {
-      bgVideoRef.current.currentTime = targetTime % bgVideoRef.current.duration;
-    }
-    if (tabVideoRef.current && tabVideoRef.current.duration) {
-      tabVideoRef.current.currentTime = Math.min(targetTime, tabVideoRef.current.duration);
-    }
+  const handleRemoveBgVideo = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setState((prev) => ({
+      ...prev,
+      bgVideoUrl: null,
+      bgVideoName: '',
+    }));
+    if (bgVideoRef.current) bgVideoRef.current.src = '';
+    showToast('Background video removed');
   };
 
   // HD Poster Frame Screenshot
@@ -295,18 +266,22 @@ export default function StudioPage() {
 
   return (
     <div className="flex flex-col h-screen w-screen bg-neutral-950 text-neutral-100 font-sans select-none overflow-hidden">
-      {/* Hidden Video Elements */}
+      {/* Hidden Video Source Elements */}
       <video
         ref={bgVideoRef}
         crossOrigin="anonymous"
         playsInline
+        muted
         loop
+        onLoadedMetadata={handleBgLoadedMetadata}
         className="hidden"
       />
       <video
         ref={tabVideoRef}
         crossOrigin="anonymous"
         playsInline
+        muted
+        loop
         onLoadedMetadata={handleTabLoadedMetadata}
         className="hidden"
       />
@@ -314,13 +289,13 @@ export default function StudioPage() {
       {/* Top Header */}
       <header className="h-14 border-b border-neutral-800 bg-neutral-950 px-4 sm:px-6 flex items-center justify-between shrink-0 z-20">
         <div className="flex items-center space-x-3">
-          <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-amber-600 via-orange-500 to-indigo-600 flex items-center justify-center shadow-md">
+          <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-sky-600 via-indigo-500 to-purple-600 flex items-center justify-center shadow-md">
             <Tablet className="w-4 h-4 text-white" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
               <span className="font-bold text-sm text-white">VideoTab Studio</span>
-              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 border border-orange-500/30">
+              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30">
                 3:4 Tab Mockup
               </span>
             </div>
@@ -334,7 +309,7 @@ export default function StudioPage() {
             className="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white text-xs font-medium transition-all flex items-center space-x-1.5"
             title="Download HD Poster PNG"
           >
-            <Camera className="w-3.5 h-3.5 text-orange-400" />
+            <Camera className="w-3.5 h-3.5 text-sky-400" />
             <span className="hidden sm:inline">Capture PNG</span>
           </button>
 
@@ -345,7 +320,7 @@ export default function StudioPage() {
               setDownloadUrl(null);
               setExportProgress(null);
             }}
-            className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white text-xs font-semibold shadow-lg shadow-orange-600/20 transition-all flex items-center space-x-1.5 active:scale-95"
+            className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-lg shadow-sky-600/20 transition-all flex items-center space-x-1.5 active:scale-95"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Export 3:4 Video</span>
@@ -357,15 +332,15 @@ export default function StudioPage() {
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         {/* Left / Center Canvas Preview Stage */}
         <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 bg-neutral-950/80 relative overflow-hidden">
-          {/* Subtle Background Pattern */}
-          <div className="absolute inset-0 bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:24px_24px] opacity-25 pointer-events-none"></div>
+          {/* Subtle Background Canvas Grid */}
+          <div className="absolute inset-0 bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:24px_24px] opacity-20 pointer-events-none"></div>
 
           {/* 3:4 Portrait Canvas Container */}
           <div
             className="relative shadow-2xl rounded-2xl overflow-hidden bg-black ring-1 ring-neutral-800 transition-all"
             style={{
               aspectRatio: '3 / 4',
-              maxHeight: 'calc(100% - 20px)',
+              maxHeight: 'calc(100% - 10px)',
               height: '100%',
             }}
           >
@@ -378,24 +353,30 @@ export default function StudioPage() {
           </div>
         </div>
 
-        {/* Right Sidebar: Simple & Practical Controls */}
-        <div className="w-full md:w-88 lg:w-96 border-t md:border-t-0 md:border-l border-neutral-800 bg-neutral-950 p-5 overflow-y-auto custom-scrollbar space-y-6 shrink-0 z-10">
+        {/* Right Sidebar: Simple, Focused & Practical */}
+        <div className="w-full md:w-88 lg:w-96 border-t md:border-t-0 md:border-l border-neutral-800 bg-neutral-950 p-5 overflow-y-auto custom-scrollbar space-y-5 shrink-0 z-10">
           
-          {/* SECTION 1: Up Layer (Tab Mockup Video) */}
+          {/* SECTION 1: Up Layer (Tab Content Video) */}
           <div className="space-y-3 bg-neutral-900/60 p-4 rounded-xl border border-neutral-800/80">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-white shadow-sm shadow-white animate-pulse"></div>
+                <div className="w-2.5 h-2.5 rounded-full bg-sky-400 shadow-sm shadow-sky-400 animate-pulse"></div>
                 <h3 className="font-bold text-xs uppercase tracking-wider text-white">
                   1. Up Video (Tab Content)
                 </h3>
               </div>
-              <span className="text-[10px] text-neutral-400 font-mono">
-                {state.tabVideoName ? 'Loaded' : 'Default'}
-              </span>
+              {state.tabVideoName && (
+                <button
+                  onClick={handleRemoveTabVideo}
+                  className="text-neutral-500 hover:text-red-400 transition-colors p-1"
+                  title="Remove video"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
             <p className="text-[11px] text-neutral-400">
-              Plays inside the centered tab. Area around tab is transparent.
+              Plays inside the centered tab. Outer area is completely transparent.
             </p>
 
             {/* Tab Video Upload Dropzone */}
@@ -415,14 +396,18 @@ export default function StudioPage() {
                 const file = e.dataTransfer.files?.[0];
                 if (file) handleTabFileUpload(file);
               }}
-              className="border-2 border-dashed border-neutral-700 hover:border-orange-500/80 bg-neutral-950/60 hover:bg-neutral-900/80 rounded-xl p-3.5 text-center cursor-pointer transition-all group"
+              className={`border-2 border-dashed rounded-xl p-3.5 text-center cursor-pointer transition-all group ${
+                state.tabVideoName
+                  ? 'border-sky-500/60 bg-sky-950/20 hover:bg-sky-950/30'
+                  : 'border-neutral-700 hover:border-sky-500/80 bg-neutral-950/60 hover:bg-neutral-900/80'
+              }`}
             >
-              <Upload className="w-5 h-5 mx-auto text-neutral-400 group-hover:text-orange-400 transition-colors mb-1.5" />
+              <Upload className="w-5 h-5 mx-auto text-neutral-400 group-hover:text-sky-400 transition-colors mb-1.5" />
               <p className="text-xs font-semibold text-neutral-200 group-hover:text-white">
-                Upload Tab Content Video
+                {state.tabVideoName ? 'Replace Tab Video' : 'Upload Tab Content Video'}
               </p>
-              <p className="text-[10px] text-neutral-500 mt-0.5 truncate max-w-[240px] mx-auto">
-                {state.tabVideoName || 'Click or drag MP4 / WebM / MOV'}
+              <p className="text-[10px] text-neutral-400 mt-0.5 truncate max-w-[240px] mx-auto font-mono">
+                {state.tabVideoName || 'Click or drag video file here'}
               </p>
             </div>
 
@@ -430,16 +415,16 @@ export default function StudioPage() {
             <div className="space-y-1.5 pt-1">
               <div className="flex justify-between text-xs text-neutral-400">
                 <span>Tab Size</span>
-                <span className="font-mono text-orange-400">{Math.round(state.tabWidthScale * 100)}%</span>
+                <span className="font-mono text-sky-400">{Math.round(state.tabWidthScale * 100)}%</span>
               </div>
               <input
                 type="range"
                 min="0.60"
-                max="0.92"
+                max="0.94"
                 step="0.02"
                 value={state.tabWidthScale}
                 onChange={(e) => setState((p) => ({ ...p, tabWidthScale: parseFloat(e.target.value) }))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
               />
             </div>
 
@@ -447,7 +432,7 @@ export default function StudioPage() {
             <div className="space-y-1.5">
               <div className="flex justify-between text-xs text-neutral-400">
                 <span>Corner Rounding</span>
-                <span className="font-mono text-orange-400">{state.tabRadius}px</span>
+                <span className="font-mono text-sky-400">{state.tabRadius}px</span>
               </div>
               <input
                 type="range"
@@ -456,33 +441,7 @@ export default function StudioPage() {
                 step="2"
                 value={state.tabRadius}
                 onChange={(e) => setState((p) => ({ ...p, tabRadius: parseInt(e.target.value) }))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
-              />
-            </div>
-
-            {/* Tab Audio Volume */}
-            <div className="space-y-1 pt-1">
-              <div className="flex justify-between items-center text-xs text-neutral-400">
-                <span className="flex items-center space-x-1">
-                  {state.isTabMuted ? <VolumeX className="w-3.5 h-3.5 text-neutral-500" /> : <Volume2 className="w-3.5 h-3.5 text-orange-400" />}
-                  <span>Tab Audio</span>
-                </span>
-                <button
-                  onClick={() => setState((p) => ({ ...p, isTabMuted: !p.isTabMuted }))}
-                  className="text-[10px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-300 hover:text-white"
-                >
-                  {state.isTabMuted ? 'Unmute' : 'Mute'}
-                </button>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={state.isTabMuted ? 0 : state.tabVolume}
-                disabled={state.isTabMuted}
-                onChange={(e) => setState((p) => ({ ...p, tabVolume: parseFloat(e.target.value) }))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500 disabled:opacity-30"
+                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
               />
             </div>
           </div>
@@ -491,17 +450,23 @@ export default function StudioPage() {
           <div className="space-y-3 bg-neutral-900/60 p-4 rounded-xl border border-neutral-800/80">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-orange-500 shadow-sm shadow-orange-500"></div>
+                <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 shadow-sm shadow-indigo-500"></div>
                 <h3 className="font-bold text-xs uppercase tracking-wider text-white">
                   2. Down Video (Background)
                 </h3>
               </div>
-              <span className="text-[10px] text-neutral-400 font-mono">
-                {state.bgVideoName ? 'Loaded' : 'Default'}
-              </span>
+              {state.bgVideoName && (
+                <button
+                  onClick={handleRemoveBgVideo}
+                  className="text-neutral-500 hover:text-red-400 transition-colors p-1"
+                  title="Remove video"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
             <p className="text-[11px] text-neutral-400">
-              Fills the 3:4 canvas behind the floating tab mockup.
+              Fills the entire 3:4 background behind the floating tab.
             </p>
 
             {/* Background Video Upload Dropzone */}
@@ -521,14 +486,18 @@ export default function StudioPage() {
                 const file = e.dataTransfer.files?.[0];
                 if (file) handleBgFileUpload(file);
               }}
-              className="border-2 border-dashed border-neutral-700 hover:border-orange-500/80 bg-neutral-950/60 hover:bg-neutral-900/80 rounded-xl p-3.5 text-center cursor-pointer transition-all group"
+              className={`border-2 border-dashed rounded-xl p-3.5 text-center cursor-pointer transition-all group ${
+                state.bgVideoName
+                  ? 'border-indigo-500/60 bg-indigo-950/20 hover:bg-indigo-950/30'
+                  : 'border-neutral-700 hover:border-indigo-500/80 bg-neutral-950/60 hover:bg-neutral-900/80'
+              }`}
             >
-              <Upload className="w-5 h-5 mx-auto text-neutral-400 group-hover:text-orange-400 transition-colors mb-1.5" />
+              <Upload className="w-5 h-5 mx-auto text-neutral-400 group-hover:text-indigo-400 transition-colors mb-1.5" />
               <p className="text-xs font-semibold text-neutral-200 group-hover:text-white">
-                Upload Background Video
+                {state.bgVideoName ? 'Replace Background Video' : 'Upload Background Video'}
               </p>
-              <p className="text-[10px] text-neutral-500 mt-0.5 truncate max-w-[240px] mx-auto">
-                {state.bgVideoName || 'Click or drag MP4 / WebM / MOV'}
+              <p className="text-[10px] text-neutral-400 mt-0.5 truncate max-w-[240px] mx-auto font-mono">
+                {state.bgVideoName || 'Click or drag video file here'}
               </p>
             </div>
 
@@ -536,7 +505,7 @@ export default function StudioPage() {
             <div className="space-y-1.5 pt-1">
               <div className="flex justify-between text-xs text-neutral-400">
                 <span>Background Blur</span>
-                <span className="font-mono text-orange-400">{state.bgBlur}px</span>
+                <span className="font-mono text-indigo-400">{state.bgBlur}px</span>
               </div>
               <input
                 type="range"
@@ -545,7 +514,7 @@ export default function StudioPage() {
                 step="1"
                 value={state.bgBlur}
                 onChange={(e) => setState((p) => ({ ...p, bgBlur: parseInt(e.target.value) }))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
               />
             </div>
 
@@ -553,7 +522,7 @@ export default function StudioPage() {
             <div className="space-y-1.5">
               <div className="flex justify-between text-xs text-neutral-400">
                 <span>Darken Background</span>
-                <span className="font-mono text-orange-400">{Math.round(state.bgDim * 100)}%</span>
+                <span className="font-mono text-indigo-400">{Math.round(state.bgDim * 100)}%</span>
               </div>
               <input
                 type="range"
@@ -562,41 +531,15 @@ export default function StudioPage() {
                 step="0.05"
                 value={state.bgDim}
                 onChange={(e) => setState((p) => ({ ...p, bgDim: parseFloat(e.target.value) }))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
-              />
-            </div>
-
-            {/* Background Audio Volume */}
-            <div className="space-y-1 pt-1">
-              <div className="flex justify-between items-center text-xs text-neutral-400">
-                <span className="flex items-center space-x-1">
-                  {state.isBgMuted ? <VolumeX className="w-3.5 h-3.5 text-neutral-500" /> : <Volume2 className="w-3.5 h-3.5 text-orange-400" />}
-                  <span>Background Audio</span>
-                </span>
-                <button
-                  onClick={() => setState((p) => ({ ...p, isBgMuted: !p.isBgMuted }))}
-                  className="text-[10px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-300 hover:text-white"
-                >
-                  {state.isBgMuted ? 'Unmute' : 'Mute'}
-                </button>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={state.isBgMuted ? 0 : state.bgVolume}
-                disabled={state.isBgMuted}
-                onChange={(e) => setState((p) => ({ ...p, bgVolume: parseFloat(e.target.value) }))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500 disabled:opacity-30"
+                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
               />
             </div>
           </div>
 
-          {/* SECTION 3: Device Frame Options */}
+          {/* SECTION 3: Device Frame Style */}
           <div className="space-y-3 bg-neutral-900/60 p-4 rounded-xl border border-neutral-800/80">
             <h3 className="font-bold text-xs uppercase tracking-wider text-white">
-              3. Mockup Frame Style
+              3. Frame & Bezel
             </h3>
 
             {/* Tablet Bezel Toggle */}
@@ -605,7 +548,7 @@ export default function StudioPage() {
               <button
                 onClick={() => setState((p) => ({ ...p, showTabletBezel: !p.showTabletBezel }))}
                 className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
-                  state.showTabletBezel ? 'bg-orange-600 text-white' : 'bg-neutral-800 text-neutral-400'
+                  state.showTabletBezel ? 'bg-sky-600 text-white' : 'bg-neutral-800 text-neutral-400'
                 }`}
               >
                 {state.showTabletBezel ? 'ON' : 'OFF'}
@@ -614,12 +557,12 @@ export default function StudioPage() {
 
             {/* Tab Style */}
             <div className="space-y-1.5 pt-1">
-              <span className="text-[11px] text-neutral-400">Tab Mockup Style</span>
+              <span className="text-[11px] text-neutral-400">Tab Style</span>
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { id: 'minimal-card', name: 'Clean Card' },
-                  { id: 'safari-dark', name: 'Safari Dark' },
-                  { id: 'chrome-dark', name: 'Chrome Dark' },
+                  { id: 'safari-dark', name: 'Safari Header' },
+                  { id: 'chrome-dark', name: 'Chrome Header' },
                   { id: 'frameless', name: 'Frameless' },
                 ].map((s) => (
                   <button
@@ -627,7 +570,7 @@ export default function StudioPage() {
                     onClick={() => setState((p) => ({ ...p, tabStyle: s.id as any }))}
                     className={`py-1.5 rounded-lg text-xs font-medium transition-all ${
                       state.tabStyle === s.id
-                        ? 'bg-orange-600 text-white font-semibold'
+                        ? 'bg-sky-600 text-white font-semibold'
                         : 'bg-neutral-800 text-neutral-400 hover:text-white'
                     }`}
                   >
@@ -637,68 +580,6 @@ export default function StudioPage() {
               </div>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Bottom Timeline Controls Bar */}
-      <div className="h-16 border-t border-neutral-800 bg-neutral-950 px-4 sm:px-6 flex items-center justify-between shrink-0 z-20 space-x-4">
-        {/* Play/Pause & Reset */}
-        <div className="flex items-center space-x-2 sm:space-x-3">
-          <button
-            onClick={() => {
-              setState((p) => ({ ...p, currentTime: 0 }));
-              if (bgVideoRef.current) bgVideoRef.current.currentTime = 0;
-              if (tabVideoRef.current) tabVideoRef.current.currentTime = 0;
-            }}
-            title="Restart"
-            className="p-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-all"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={() => setState((p) => ({ ...p, isPlaying: !p.isPlaying }))}
-            className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
-              state.isPlaying
-                ? 'bg-neutral-800 text-white hover:bg-neutral-700'
-                : 'bg-orange-600 text-white hover:bg-orange-500 shadow-md shadow-orange-600/30'
-            }`}
-          >
-            {state.isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
-          </button>
-
-          <div className="font-mono text-xs text-neutral-300">
-            <span className="text-white font-semibold">{formatTime(state.currentTime)}</span>
-            <span className="text-neutral-500 mx-1">/</span>
-            <span className="text-neutral-400">{formatTime(state.duration)}</span>
-          </div>
-        </div>
-
-        {/* Timeline Scrubber */}
-        <div className="flex-1 max-w-2xl px-2">
-          <input
-            type="range"
-            min="0"
-            max={state.duration || 10}
-            step="0.05"
-            value={state.currentTime}
-            onChange={handleScrubberChange}
-            className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
-          />
-        </div>
-
-        {/* Master Output Volume */}
-        <div className="hidden sm:flex items-center space-x-2">
-          <Volume2 className="w-4 h-4 text-neutral-400" />
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={state.masterVolume}
-            onChange={(e) => setState((p) => ({ ...p, masterVolume: parseFloat(e.target.value) }))}
-            className="w-20 h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
-          />
         </div>
       </div>
 
@@ -725,18 +606,18 @@ export default function StudioPage() {
                     <span className="font-mono text-white">1080 × 1440 (3:4 HD)</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-neutral-400">Duration:</span>
-                    <span className="font-mono text-white">{state.duration.toFixed(1)}s</span>
-                  </div>
-                  <div className="flex justify-between">
                     <span className="text-neutral-400">Framerate:</span>
                     <span className="font-mono text-white">60 FPS Lossless</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-neutral-400">Audio:</span>
+                    <span className="text-neutral-400 font-mono">None (Clean Silent Video)</span>
                   </div>
                 </div>
 
                 <button
                   onClick={handleStartExport}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold text-xs shadow-lg shadow-orange-600/30 flex items-center justify-center space-x-2 transition-all"
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-sky-600/30 flex items-center justify-center space-x-2 transition-all"
                 >
                   <Download className="w-4 h-4" />
                   <span>Start Video Render</span>
@@ -746,18 +627,18 @@ export default function StudioPage() {
 
             {isExporting && exportProgress && (
               <div className="py-6 text-center space-y-4">
-                <Loader2 className="w-8 h-8 mx-auto text-orange-400 animate-spin" />
+                <Loader2 className="w-8 h-8 mx-auto text-sky-400 animate-spin" />
                 <div>
                   <h4 className="font-bold text-sm text-white">Rendering 3:4 Composition...</h4>
-                  <p className="text-xs text-neutral-400 mt-1">Merging tab video and background layer</p>
+                  <p className="text-xs text-neutral-400 mt-1">Merging tab video and background layer frame-by-frame</p>
                 </div>
                 <div className="w-full h-2.5 bg-neutral-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-orange-500 to-amber-500 transition-all duration-150"
+                    className="h-full bg-gradient-to-r from-sky-500 to-indigo-500 transition-all duration-150"
                     style={{ width: `${exportProgress.progress}%` }}
                   />
                 </div>
-                <span className="text-xs font-mono text-orange-400 font-bold">{exportProgress.progress}%</span>
+                <span className="text-xs font-mono text-sky-400 font-bold">{exportProgress.progress}%</span>
               </div>
             )}
 
@@ -771,7 +652,7 @@ export default function StudioPage() {
                 <div className="grid grid-cols-2 gap-2 pt-2">
                   <button
                     onClick={handleDownloadExportedVideo}
-                    className="py-2.5 px-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold flex items-center justify-center space-x-1.5"
+                    className="py-2.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center justify-center space-x-1.5 shadow-md shadow-sky-600/20"
                   >
                     <Download className="w-4 h-4" />
                     <span>Download</span>
@@ -792,7 +673,7 @@ export default function StudioPage() {
         </div>
       )}
 
-      {/* Toast */}
+      {/* Toast Feedback */}
       {toastMessage && (
         <div className="fixed top-16 right-6 z-50 bg-neutral-900 border border-neutral-700 text-white text-xs px-4 py-2.5 rounded-xl shadow-2xl flex items-center space-x-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />

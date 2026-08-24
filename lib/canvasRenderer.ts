@@ -19,61 +19,71 @@ export function renderStudioFrame({
   width,
   height,
 }: RenderOptions) {
-  // Clear canvas
+  // Clear full canvas with transparency
   ctx.clearRect(0, 0, width, height);
 
   const baseScale = width / 1080;
   const isBezel = state.showTabletBezel;
 
-  // Screen area inside the tablet frame if bezel is enabled
-  const bezelMargin = isBezel ? Math.round(44 * baseScale) : 0;
-  const screenX = bezelMargin;
-  const screenY = bezelMargin;
-  const screenW = width - bezelMargin * 2;
-  const screenH = height - bezelMargin * 2;
-  const screenRadius = isBezel ? Math.round(36 * baseScale) : 0;
+  // Tablet Device Outer Bezel & Screen Dimensions
+  const outerPad = isBezel ? Math.round(12 * baseScale) : 0;
+  const bezelThickness = isBezel ? Math.round(36 * baseScale) : 0;
+  const screenX = outerPad + bezelThickness;
+  const screenY = outerPad + bezelThickness;
+  const screenW = width - (screenX * 2);
+  const screenH = height - (screenY * 2);
+  const screenRadius = isBezel ? Math.round(28 * baseScale) : 0;
+  const outerRadius = isBezel ? Math.round(48 * baseScale) : 0;
 
   // -------------------------------------------------------------
-  // Outer Bezel Background (if tablet frame enabled)
+  // 1. Device Outer Body Bezel
   // -------------------------------------------------------------
   if (isBezel) {
     ctx.save();
-    // Device body outer rounded rect
-    drawRoundedRectPath(ctx, 0, 0, width, height, Math.round(52 * baseScale));
-    ctx.fillStyle = '#0d0e12';
+    // Device Body
+    drawPerfectRoundedRect(
+      ctx,
+      outerPad,
+      outerPad,
+      width - outerPad * 2,
+      height - outerPad * 2,
+      outerRadius
+    );
+    ctx.fillStyle = '#0f1015';
     ctx.fill();
 
-    // Subtle device outer metallic edge
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    // Metallic Outer Rim Highlight
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
     ctx.lineWidth = 2 * baseScale;
     ctx.stroke();
 
     // Top Camera Dot
-    ctx.fillStyle = '#1e222d';
+    ctx.fillStyle = '#1c1f26';
     ctx.beginPath();
-    ctx.arc(width / 2, 22 * baseScale, 4.5 * baseScale, 0, Math.PI * 2);
+    ctx.arc(width / 2, outerPad + bezelThickness / 2, 4.5 * baseScale, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = '#0b0f19';
     ctx.beginPath();
-    ctx.arc(width / 2, 22 * baseScale, 2 * baseScale, 0, Math.PI * 2);
+    ctx.arc(width / 2, outerPad + bezelThickness / 2, 2 * baseScale, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.restore();
   }
 
-  // Clip everything inside the screen area
+  // -------------------------------------------------------------
+  // Clip to Screen Area
+  // -------------------------------------------------------------
   ctx.save();
   if (isBezel) {
-    drawRoundedRectPath(ctx, screenX, screenY, screenW, screenH, screenRadius);
+    drawPerfectRoundedRect(ctx, screenX, screenY, screenW, screenH, screenRadius);
     ctx.clip();
   }
 
   // -------------------------------------------------------------
-  // 1. LAYER 1: DOWN (BACKGROUND VIDEO LAYER)
+  // 2. LAYER 1: DOWN (BACKGROUND VIDEO)
   // -------------------------------------------------------------
   ctx.save();
 
-  // Background blur filter
   if (state.bgBlur > 0) {
     ctx.filter = `blur(${state.bgBlur * baseScale}px)`;
   }
@@ -86,7 +96,7 @@ export function renderStudioFrame({
 
       const hRatio = screenW / vWidth;
       const vRatio = screenH / vHeight;
-      const ratio = Math.max(hRatio, vRatio) * 1.05; // slight zoom to prevent blur edge bleeding
+      const ratio = Math.max(hRatio, vRatio) * 1.08; // slight zoom so blur doesn't bleed edge
       const drawW = vWidth * ratio;
       const drawH = vHeight * ratio;
       const drawX = screenX + (screenW - drawW) / 2;
@@ -100,79 +110,67 @@ export function renderStudioFrame({
   }
 
   if (!bgDrawn) {
-    // Elegant warm dark background gradient matching the user's reference image
+    // Elegant clean background placeholder
     const grad = ctx.createLinearGradient(screenX, screenY, screenX + screenW, screenY + screenH);
-    grad.addColorStop(0, '#1c0c04');
-    grad.addColorStop(0.35, '#2e1408');
-    grad.addColorStop(0.7, '#140803');
-    grad.addColorStop(1, '#080302');
+    grad.addColorStop(0, '#1e293b');
+    grad.addColorStop(0.5, '#0f172a');
+    grad.addColorStop(1, '#020617');
     ctx.fillStyle = grad;
     ctx.fillRect(screenX, screenY, screenW, screenH);
 
-    // Warm ambient glow circle in top-left
-    const glow = ctx.createRadialGradient(
-      screenX + screenW * 0.35,
-      screenY + screenH * 0.25,
-      0,
-      screenX + screenW * 0.35,
-      screenY + screenH * 0.25,
-      screenW * 0.5
-    );
-    glow.addColorStop(0, 'rgba(234, 88, 12, 0.25)');
-    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(screenX, screenY, screenW, screenH);
+    // Subtle guide text on canvas if no video is loaded
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.4)';
+    ctx.font = `600 ${Math.floor(22 * baseScale)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('⬇️ Upload Down Video (Background)', screenX + screenW / 2, screenY + screenH * 0.22);
   }
 
   ctx.restore();
 
-  // Dark dim overlay on background
+  // Dim overlay
   if (state.bgDim > 0) {
     ctx.fillStyle = `rgba(0, 0, 0, ${state.bgDim})`;
     ctx.fillRect(screenX, screenY, screenW, screenH);
   }
 
   // -------------------------------------------------------------
-  // 2. LAYER 2: UP (CENTERED TAB MOCKUP + CONTENT VIDEO)
-  // Transparent everywhere except inside the tab!
+  // 3. LAYER 2: UP (CENTERED TAB MOCKUP + CONTENT VIDEO)
   // -------------------------------------------------------------
   const tabW = Math.round(screenW * state.tabWidthScale);
-  // Content video aspect ratio inside tab (~ 16:11 or 4:3)
-  const tabH = Math.round(tabW * 0.72);
-
+  const tabH = Math.round(tabW * 0.72); // standard portrait card ratio
   const tabX = screenX + (screenW - tabW) / 2;
   const tabY = screenY + (screenH - tabH) / 2;
   const radius = Math.round(state.tabRadius * baseScale);
 
-  ctx.save();
-
-  // Draw Realistic Drop Shadow around the tab
+  // Drop Shadow
   if (state.tabShadow === 'deep') {
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
     ctx.shadowBlur = 48 * baseScale;
     ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 22 * baseScale;
-    drawRoundedRectPath(ctx, tabX, tabY, tabW, tabH, radius);
+    ctx.shadowOffsetY = 24 * baseScale;
+    drawPerfectRoundedRect(ctx, tabX, tabY, tabW, tabH, radius);
     ctx.fillStyle = '#000000';
     ctx.fill();
+    ctx.restore();
   } else if (state.tabShadow === 'soft') {
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
     ctx.shadowBlur = 24 * baseScale;
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 12 * baseScale;
-    drawRoundedRectPath(ctx, tabX, tabY, tabW, tabH, radius);
+    drawPerfectRoundedRect(ctx, tabX, tabY, tabW, tabH, radius);
     ctx.fillStyle = '#000000';
     ctx.fill();
+    ctx.restore();
   }
 
-  ctx.restore();
-
-  // Draw Tab Content Area (Clipped to Rounded Rect)
+  // Clip Tab Content
   ctx.save();
-  drawRoundedRectPath(ctx, tabX, tabY, tabW, tabH, radius);
+  drawPerfectRoundedRect(ctx, tabX, tabY, tabW, tabH, radius);
   ctx.clip();
 
-  // Tab Background (Black)
+  // Tab Base Background
   ctx.fillStyle = '#000000';
   ctx.fillRect(tabX, tabY, tabW, tabH);
 
@@ -182,7 +180,6 @@ export function renderStudioFrame({
       const vWidth = tabVideo.videoWidth || 1920;
       const vHeight = tabVideo.videoHeight || 1080;
 
-      // Cover fill inside tab
       const hRatio = tabW / vWidth;
       const vRatio = tabH / vHeight;
       const ratio = Math.max(hRatio, vRatio);
@@ -199,64 +196,48 @@ export function renderStudioFrame({
   }
 
   if (!tabDrawn) {
-    // Clean mock content matching the reference image ("Digitizing Biology to Transform All Omics")
-    // Top light half
-    const topH = tabH * 0.45;
+    // Clean tab placeholder
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(tabX, tabY, tabW, tabH);
+
     ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(tabX, tabY, tabW, topH);
+    ctx.font = `bold ${Math.floor(20 * baseScale)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('⬆️ Upload Up Video', tabX + tabW / 2, tabY + tabH / 2 - 8 * baseScale);
 
-    // Subtle header microtext
     ctx.fillStyle = '#64748b';
-    ctx.font = `600 ${Math.floor(9 * baseScale)}px sans-serif`;
-    ctx.fillText('RESEARCH & PIPELINE', tabX + 24 * baseScale, tabY + 28 * baseScale);
-    ctx.fillText('MOLECULAR SENSING', tabX + tabW * 0.4, tabY + 28 * baseScale);
-    ctx.fillText('CLINICAL SYNTHESIS', tabX + tabW * 0.72, tabY + 28 * baseScale);
-
-    // Bottom dark half
-    ctx.fillStyle = '#0a0a0c';
-    ctx.fillRect(tabX, tabY + topH, tabW, tabH - topH);
-
-    // Big Headline in bottom dark half
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `bold ${Math.floor(26 * baseScale)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-    ctx.fillText('Digitizing Biology to Transform', tabX + 24 * baseScale, tabY + topH + 48 * baseScale);
-    ctx.fillText('All Omics', tabX + 24 * baseScale, tabY + topH + 82 * baseScale);
-
-    // Bottom micro footer
-    ctx.fillStyle = '#52525b';
-    ctx.font = `${Math.floor(10 * baseScale)}px sans-serif`;
-    ctx.fillText('A UNIVERSAL PLATFORM', tabX + 24 * baseScale, tabY + tabH - 18 * baseScale);
+    ctx.font = `${Math.floor(13 * baseScale)}px sans-serif`;
+    ctx.fillText('Content video will play inside this centered tab', tabX + tabW / 2, tabY + tabH / 2 + 18 * baseScale);
   }
 
-  // Header bar if Safari/Chrome style is enabled
+  // Optional Safari / Chrome Header bar
   if (state.tabStyle === 'safari-dark' || state.tabStyle === 'chrome-dark') {
     const headerH = Math.round(34 * baseScale);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
     ctx.fillRect(tabX, tabY, tabW, headerH);
 
-    // Traffic light dots
+    // Window Dots
     const dots = ['#ff5f56', '#ffbd2e', '#27c93f'];
     dots.forEach((color, i) => {
       ctx.beginPath();
-      ctx.arc(tabX + 18 * baseScale + i * 14 * baseScale, tabY + headerH / 2, 4.5 * baseScale, 0, Math.PI * 2);
+      ctx.arc(tabX + 18 * baseScale + i * 14 * baseScale, tabY + headerH / 2, 4 * baseScale, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
     });
 
-    // Clean address bar in middle
-    const pillW = tabW * 0.55;
+    // Pill
+    const pillW = tabW * 0.5;
     const pillH = 20 * baseScale;
     const pillX = tabX + (tabW - pillW) / 2;
     const pillY = tabY + (headerH - pillH) / 2;
-    drawRoundedRectPath(ctx, pillX, pillY, pillW, pillH, 5 * baseScale);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    drawPerfectRoundedRect(ctx, pillX, pillY, pillW, pillH, 5 * baseScale);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
     ctx.fill();
 
     ctx.fillStyle = '#94a3b8';
     ctx.font = `500 ${Math.floor(10 * baseScale)}px sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText('studio.app/preview', tabX + tabW / 2, pillY + pillH * 0.72);
-    ctx.textAlign = 'left';
+    ctx.fillText('tab-content.mp4', tabX + tabW / 2, pillY + pillH * 0.72);
   }
 
   ctx.restore();
@@ -264,17 +245,21 @@ export function renderStudioFrame({
   // Tab Border Outline
   if (state.tabBorder) {
     ctx.save();
-    drawRoundedRectPath(ctx, tabX, tabY, tabW, tabH, radius);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    drawPerfectRoundedRect(ctx, tabX, tabY, tabW, tabH, radius);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
     ctx.lineWidth = 1.5 * baseScale;
     ctx.stroke();
     ctx.restore();
   }
 
-  ctx.restore(); // restore screen clipping
+  ctx.restore(); // Screen clip restore
 }
 
-function drawRoundedRectPath(
+/**
+ * Mathematically perfect 4-corner arc rounded rectangle.
+ * Prevents any line-glitches, corner tearing, or arcTo artifacts on HTML5 canvas.
+ */
+function drawPerfectRoundedRect(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
@@ -282,16 +267,18 @@ function drawRoundedRectPath(
   h: number,
   r: number
 ) {
-  const radius = Math.min(r, w / 2, h / 2);
+  const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+  if (radius === 0) {
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.closePath();
+    return;
+  }
+
   ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.lineTo(x + w - radius, y);
-  ctx.arcTo(x + w, y, x + w, y + radius, radius);
-  ctx.lineTo(x + w, y + h - radius);
-  ctx.arcTo(x + w, y + h, x + w - radius, y + h, radius);
-  ctx.lineTo(x + radius, y + h);
-  ctx.arcTo(x, y, x + radius, y, radius);
-  ctx.lineTo(x, y + radius);
-  ctx.arcTo(x, y, x + radius, y, radius);
+  ctx.arc(x + radius, y + radius, radius, Math.PI, Math.PI * 1.5);
+  ctx.arc(x + w - radius, y + radius, radius, Math.PI * 1.5, 0);
+  ctx.arc(x + w - radius, y + h - radius, radius, 0, Math.PI * 0.5);
+  ctx.arc(x + radius, y + h - radius, radius, Math.PI * 0.5, Math.PI);
   ctx.closePath();
 }
