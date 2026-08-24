@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { StudioState, MacOsFrameStyle } from '@/lib/types';
+import { StudioState, MacOsFrameStyle, TabAnimationType } from '@/lib/types';
 import { renderStudioFrame } from '@/lib/canvasRenderer';
 import { StudioVideoExporter, ExportProgress } from '@/lib/videoExporter';
 import { 
@@ -13,9 +13,13 @@ import {
   X, 
   Loader2, 
   Trash2,
-  Sparkles,
   Globe,
-  HardDrive
+  HardDrive,
+  Rotate3d,
+  Activity,
+  Waves,
+  Zap,
+  Repeat
 } from 'lucide-react';
 
 const INITIAL_STATE: StudioState = {
@@ -26,6 +30,9 @@ const INITIAL_STATE: StudioState = {
   macFrameStyle: 'safari-sonoma-dark',
   tabTitle: 'studio.app',
   tabUrl: 'https://studio.app/preview',
+  animationType: '3d-flip-h',
+  flipInterval: 3.0,
+  animationSpeed: 1.0,
   showTabletBezel: true,
   duration: 10,
   currentTime: 0,
@@ -38,6 +45,16 @@ const MAC_STYLES: { id: MacOsFrameStyle; name: string; desc: string }[] = [
   { id: 'chrome-macos', name: 'Chrome macOS', desc: 'Modern macOS Chrome window frame' },
   { id: 'glass-frost-mac', name: 'Glass Frost macOS', desc: 'Translucent frosted glass window' },
   { id: 'minimal-mac', name: 'Minimal macOS', desc: 'Clean titlebar with traffic lights' },
+];
+
+const ANIMATION_PRESETS: { id: TabAnimationType; name: string; desc: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: '3d-flip-h', name: '3D Horizontal Flip', desc: 'Smooth 360° Y-axis card flip', icon: Rotate3d },
+  { id: '3d-flip-v', name: '3D Vertical Flip', desc: 'Dramatic 360° X-axis page flip', icon: Rotate3d },
+  { id: 'floating-wave', name: 'Floating Drift & Tilt', desc: 'Continuous floating wave with perspective tilt', icon: Waves },
+  { id: 'pulse-bounce', name: 'Pop Pulse Bounce', desc: 'Rhythmic scale pop at intervals', icon: Activity },
+  { id: 'slide-snap', name: 'Slide & Snap', desc: 'Horizontal slide out and snap in', icon: Zap },
+  { id: 'spin-360', name: '360° Elastic Spin', desc: 'Snappy 360° rotation spin', icon: Repeat },
+  { id: 'none', name: 'Static Centered', desc: 'No animation, stays firmly centered', icon: Tablet },
 ];
 
 export default function StudioPage() {
@@ -107,9 +124,9 @@ export default function StudioPage() {
     }
   }, [state.isExporting]);
 
-  // 60 FPS Canvas Render Loop (Active when not exporting)
+  // 60 FPS Canvas Render Loop
   useEffect(() => {
-    if (state.isExporting) return; // Freeze preview loop while exporting for max rendering performance
+    if (state.isExporting) return;
 
     let animId: number;
     const canvas = canvasRef.current;
@@ -160,9 +177,18 @@ export default function StudioPage() {
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [state.isExporting, state.macFrameStyle, state.showTabletBezel, state.tabTitle, state.tabUrl]);
+  }, [
+    state.isExporting, 
+    state.macFrameStyle, 
+    state.showTabletBezel, 
+    state.tabTitle, 
+    state.tabUrl, 
+    state.animationType, 
+    state.flipInterval, 
+    state.animationSpeed
+  ]);
 
-  // Update duration when tab metadata loads
+  // Duration sync
   const handleTabLoadedMetadata = useCallback(() => {
     const tab = tabVideoRef.current;
     if (tab && tab.duration && !isNaN(tab.duration)) {
@@ -216,7 +242,7 @@ export default function StudioPage() {
     showToast('Background video removed');
   };
 
-  // HD Poster Frame Screenshot
+  // HD Poster Screenshot
   const handleCaptureScreenshot = () => {
     const exporter = new StudioVideoExporter();
     const dataUrl = exporter.captureStillFrame(state, bgVideoRef.current, tabVideoRef.current);
@@ -224,7 +250,7 @@ export default function StudioPage() {
 
     const a = document.createElement('a');
     a.href = dataUrl;
-    a.download = `macos-tab-mockup-${Date.now()}.png`;
+    a.download = `macos-tab-flip-${Date.now()}.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -313,14 +339,13 @@ export default function StudioPage() {
             <div className="flex items-center space-x-2">
               <span className="font-bold text-sm text-white">VideoTab Studio</span>
               <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30">
-                macOS Tab Mockup
+                macOS Tab Flip
               </span>
             </div>
           </div>
         </div>
 
         <div className="flex items-center space-x-2.5">
-          {/* HD Screenshot */}
           <button
             onClick={handleCaptureScreenshot}
             className="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white text-xs font-medium transition-all flex items-center space-x-1.5"
@@ -330,7 +355,6 @@ export default function StudioPage() {
             <span className="hidden sm:inline">Capture PNG</span>
           </button>
 
-          {/* Export Video */}
           <button
             onClick={() => {
               setShowExportModal(true);
@@ -348,11 +372,10 @@ export default function StudioPage() {
 
       {/* Main Workspace */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
-        {/* Left / Center Canvas Preview Stage */}
+        {/* Left Canvas Preview Stage */}
         <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 bg-neutral-950/80 relative overflow-hidden">
           <div className="absolute inset-0 bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:24px_24px] opacity-20 pointer-events-none"></div>
 
-          {/* 3:4 Portrait Canvas Container */}
           <div
             className="relative shadow-2xl rounded-2xl overflow-hidden bg-black ring-1 ring-neutral-800 transition-all"
             style={{
@@ -370,7 +393,7 @@ export default function StudioPage() {
           </div>
         </div>
 
-        {/* Right Sidebar: Clean, Ultra-Solid macOS Frame Controls */}
+        {/* Right Sidebar */}
         <div className="w-full md:w-88 lg:w-96 border-t md:border-t-0 md:border-l border-neutral-800 bg-neutral-950 p-5 overflow-y-auto custom-scrollbar space-y-5 shrink-0 z-10">
           
           {/* SECTION 1: Up Layer (Tab Content Video) */}
@@ -392,9 +415,6 @@ export default function StudioPage() {
                 </button>
               )}
             </div>
-            <p className="text-[11px] text-neutral-400">
-              Plays inside the centered macOS window tab.
-            </p>
 
             <input
               ref={tabFileInputRef}
@@ -412,13 +432,13 @@ export default function StudioPage() {
                 const file = e.dataTransfer.files?.[0];
                 if (file) handleTabFileUpload(file);
               }}
-              className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all group ${
+              className={`border-2 border-dashed rounded-xl p-3.5 text-center cursor-pointer transition-all group ${
                 state.tabVideoName
                   ? 'border-sky-500/60 bg-sky-950/20 hover:bg-sky-950/30'
                   : 'border-neutral-700 hover:border-sky-500/80 bg-neutral-950/60 hover:bg-neutral-900/80'
               }`}
             >
-              <Upload className="w-5 h-5 mx-auto text-neutral-400 group-hover:text-sky-400 transition-colors mb-1.5" />
+              <Upload className="w-5 h-5 mx-auto text-neutral-400 group-hover:text-sky-400 transition-colors mb-1" />
               <p className="text-xs font-semibold text-neutral-200 group-hover:text-white">
                 {state.tabVideoName ? 'Replace Tab Video' : 'Upload Tab Content Video'}
               </p>
@@ -447,9 +467,6 @@ export default function StudioPage() {
                 </button>
               )}
             </div>
-            <p className="text-[11px] text-neutral-400">
-              Fills the background area behind the macOS tab.
-            </p>
 
             <input
               ref={bgFileInputRef}
@@ -467,13 +484,13 @@ export default function StudioPage() {
                 const file = e.dataTransfer.files?.[0];
                 if (file) handleBgFileUpload(file);
               }}
-              className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all group ${
+              className={`border-2 border-dashed rounded-xl p-3.5 text-center cursor-pointer transition-all group ${
                 state.bgVideoName
                   ? 'border-indigo-500/60 bg-indigo-950/20 hover:bg-indigo-950/30'
                   : 'border-neutral-700 hover:border-indigo-500/80 bg-neutral-950/60 hover:bg-neutral-900/80'
               }`}
             >
-              <Upload className="w-5 h-5 mx-auto text-neutral-400 group-hover:text-indigo-400 transition-colors mb-1.5" />
+              <Upload className="w-5 h-5 mx-auto text-neutral-400 group-hover:text-indigo-400 transition-colors mb-1" />
               <p className="text-xs font-semibold text-neutral-200 group-hover:text-white">
                 {state.bgVideoName ? 'Replace Background Video' : 'Upload Background Video'}
               </p>
@@ -483,48 +500,127 @@ export default function StudioPage() {
             </div>
           </div>
 
-          {/* SECTION 3: Authentic macOS Tab Frame Styles */}
+          {/* SECTION 3: Tab Movement & Flip Animation Engine */}
+          <div className="space-y-3 bg-neutral-900/60 p-4 rounded-xl border border-neutral-800/80">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-xs uppercase tracking-wider text-white flex items-center space-x-1.5">
+                <Rotate3d className="w-3.5 h-3.5 text-sky-400" />
+                <span>3. Tab Flip & Motion</span>
+              </h3>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-semibold font-mono">
+                {state.flipInterval.toFixed(1)}s Interval
+              </span>
+            </div>
+
+            {/* Animation Style Selector */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] text-neutral-400">Movement Style</label>
+              <div className="grid grid-cols-1 gap-1.5">
+                {ANIMATION_PRESETS.map((anim) => {
+                  const isSelected = state.animationType === anim.id;
+                  const Icon = anim.icon;
+                  return (
+                    <button
+                      key={anim.id}
+                      onClick={() => setState((p) => ({ ...p, animationType: anim.id }))}
+                      className={`w-full text-left p-2 rounded-lg border transition-all flex items-center justify-between ${
+                        isSelected
+                          ? 'bg-sky-950/60 border-sky-500 text-white shadow-sm'
+                          : 'bg-neutral-950 border-neutral-800/80 text-neutral-400 hover:text-white hover:bg-neutral-900'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2.5 truncate">
+                        <Icon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-sky-400' : 'text-neutral-500'}`} />
+                        <div>
+                          <span className="text-xs font-semibold text-white block">{anim.name}</span>
+                          <span className="text-[10px] text-neutral-500 block truncate">{anim.desc}</span>
+                        </div>
+                      </div>
+                      {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400 shrink-0 ml-2" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* User Input: Flip Interval Slider & Quick Presets */}
+            {state.animationType !== 'none' && (
+              <div className="space-y-2 pt-2 border-t border-neutral-800/80">
+                <div className="flex justify-between text-xs text-neutral-300">
+                  <span>Flip Interval (Seconds)</span>
+                  <span className="font-mono text-sky-400 font-bold">{state.flipInterval.toFixed(1)}s</span>
+                </div>
+
+                <input
+                  type="range"
+                  min="1.0"
+                  max="10.0"
+                  step="0.5"
+                  value={state.flipInterval}
+                  onChange={(e) => setState((p) => ({ ...p, flipInterval: parseFloat(e.target.value) }))}
+                  className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
+                />
+
+                {/* Quick Interval Buttons */}
+                <div className="flex items-center justify-between space-x-1 pt-1">
+                  {[1.0, 2.0, 3.0, 4.0, 5.0, 8.0].map((sec) => (
+                    <button
+                      key={sec}
+                      onClick={() => setState((p) => ({ ...p, flipInterval: sec }))}
+                      className={`flex-1 py-1 rounded text-[10px] font-mono font-medium transition-all ${
+                        state.flipInterval === sec
+                          ? 'bg-sky-600 text-white font-bold'
+                          : 'bg-neutral-950 text-neutral-400 hover:text-white border border-neutral-800'
+                      }`}
+                    >
+                      {sec}s
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 4: macOS Tab Frame Styles */}
           <div className="space-y-3 bg-neutral-900/60 p-4 rounded-xl border border-neutral-800/80">
             <h3 className="font-bold text-xs uppercase tracking-wider text-white">
-              3. macOS Window Frame
+              4. macOS Window Chrome
             </h3>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {MAC_STYLES.map((style) => {
                 const isSelected = state.macFrameStyle === style.id;
                 return (
                   <button
                     key={style.id}
                     onClick={() => setState((p) => ({ ...p, macFrameStyle: style.id }))}
-                    className={`w-full text-left p-2.5 rounded-xl border transition-all flex items-center justify-between ${
+                    className={`w-full text-left p-2 rounded-lg border transition-all flex items-center justify-between ${
                       isSelected
-                        ? 'bg-sky-950/50 border-sky-500 text-white shadow-md shadow-sky-500/10'
+                        ? 'bg-sky-950/50 border-sky-500 text-white shadow-sm'
                         : 'bg-neutral-950 border-neutral-800/80 text-neutral-400 hover:text-white hover:bg-neutral-900'
                     }`}
                   >
                     <div>
-                      <div className="flex items-center space-x-2">
-                        {/* Traffic light icon preview */}
-                        <div className="flex items-center space-x-1">
-                          <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                          <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
-                          <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                      <div className="flex items-center space-x-1.5">
+                        <div className="flex items-center space-x-0.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                          <span className="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
                         </div>
                         <span className="text-xs font-semibold text-white">{style.name}</span>
                       </div>
-                      <p className="text-[10px] text-neutral-500 mt-0.5 pl-7">{style.desc}</p>
                     </div>
-                    {isSelected && <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0" />}
+                    {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400 shrink-0" />}
                   </button>
                 );
               })}
             </div>
 
             {/* Custom URL Pill / Title Input */}
-            <div className="space-y-1.5 pt-2 border-t border-neutral-800/80">
+            <div className="space-y-1 pt-2 border-t border-neutral-800/80">
               <label className="text-[11px] text-neutral-400 flex items-center space-x-1">
                 <Globe className="w-3 h-3 text-sky-400" />
-                <span>macOS URL Bar Text</span>
+                <span>macOS URL Bar</span>
               </label>
               <input
                 type="text"
@@ -551,7 +647,7 @@ export default function StudioPage() {
         </div>
       </div>
 
-      {/* Export Modal with Total MBs Display & Lossless Compression */}
+      {/* Export Modal */}
       {showExportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
@@ -577,12 +673,16 @@ export default function StudioPage() {
                     <span className="font-mono text-white">1080 × 1440 (3:4 HD)</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-neutral-400">Compression:</span>
-                    <span className="font-mono text-emerald-400">Smart VP9 High-Efficiency</span>
+                    <span className="text-neutral-400">Tab Animation:</span>
+                    <span className="font-mono text-sky-300 capitalize">{state.animationType.replace('-', ' ')}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-neutral-400">Preview Engine:</span>
-                    <span className="font-mono text-sky-400">Auto-Paused During Render</span>
+                    <span className="text-neutral-400">Flip Interval:</span>
+                    <span className="font-mono text-sky-300">{state.flipInterval}s cycle</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-neutral-400">Compression:</span>
+                    <span className="font-mono text-emerald-400">VP9 High-Efficiency</span>
                   </div>
                 </div>
 
@@ -601,7 +701,7 @@ export default function StudioPage() {
                 <Loader2 className="w-8 h-8 mx-auto text-sky-400 animate-spin" />
                 <div>
                   <h4 className="font-bold text-sm text-white">Rendering & Compressing...</h4>
-                  <p className="text-xs text-neutral-400 mt-1">Live preview is paused for maximum encoding speed</p>
+                  <p className="text-xs text-neutral-400 mt-1">Exporting frame-by-frame with 3D flip animation</p>
                 </div>
                 <div className="w-full h-2.5 bg-neutral-800 rounded-full overflow-hidden">
                   <div

@@ -1,4 +1,4 @@
-import { StudioState, MacOsFrameStyle } from './types';
+import { StudioState, MacOsFrameStyle, TabAnimationType } from './types';
 
 export interface RenderOptions {
   ctx: CanvasRenderingContext2D;
@@ -80,7 +80,7 @@ export function renderStudioFrame({
   // 3. LAYER 1: DOWN (BACKGROUND VIDEO)
   // -------------------------------------------------------------
   ctx.save();
-  ctx.filter = `blur(${6 * baseScale}px)`; // Optimized default blur
+  ctx.filter = `blur(${6 * baseScale}px)`;
 
   let bgDrawn = false;
   if (bgVideo && bgVideo.readyState >= 2 && !bgVideo.error) {
@@ -119,14 +119,14 @@ export function renderStudioFrame({
 
   ctx.restore();
 
-  // Subtle dark atmospheric overlay
+  // Subtle dark overlay
   ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
   ctx.fillRect(screenX, screenY, screenW, screenH);
 
   // -------------------------------------------------------------
-  // 4. LAYER 2: UP (AUTHENTIC macOS TAB MOCKUP + CONTENT VIDEO)
+  // 4. LAYER 2: UP (ANIMATED FLIPPING macOS TAB + CONTENT VIDEO)
   // -------------------------------------------------------------
-  const tabW = Math.round(screenW * 0.78); // Ideal 78% golden proportion
+  const tabW = Math.round(screenW * 0.78);
   const headerH = Math.round(44 * baseScale);
   const contentH = Math.round(tabW * 0.62);
   const tabH = headerH + contentH;
@@ -134,19 +134,25 @@ export function renderStudioFrame({
   const tabX = screenX + (screenW - tabW) / 2;
   const tabY = screenY + (screenH - tabH) / 2;
   const radius = Math.round(18 * baseScale);
+  const centerX = tabX + tabW / 2;
+  const centerY = tabY + tabH / 2;
 
-  // Deep realistic macOS Drop Shadow
+  // Apply User-Selected Tab Movement & 3D Flip Transformation
   ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.82)';
-  ctx.shadowBlur = 48 * baseScale;
+  const animInfo = applyTabAnimation(ctx, state.animationType, state.flipInterval, state.animationSpeed, time, centerX, centerY, baseScale);
+
+  // 3D Elevation Dynamic Shadow
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+  ctx.shadowBlur = Math.max(16, (48 + animInfo.shadowElevation) * baseScale);
   ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = 24 * baseScale;
+  ctx.shadowOffsetY = Math.max(10, (24 + animInfo.shadowOffsetY) * baseScale);
   drawPerfectRoundedRect(ctx, tabX, tabY, tabW, tabH, radius);
   ctx.fillStyle = '#000000';
   ctx.fill();
   ctx.restore();
 
-  // Clip Entire Window
+  // Clip Entire Window for Content & Header
   ctx.save();
   drawPerfectRoundedRect(ctx, tabX, tabY, tabW, tabH, radius);
   ctx.clip();
@@ -191,7 +197,7 @@ export function renderStudioFrame({
 
     ctx.fillStyle = '#64748b';
     ctx.font = `${Math.floor(12 * baseScale)}px sans-serif`;
-    ctx.fillText('Content video will play inside this macOS tab', tabX + tabW / 2, contentY + contentH / 2 + 18 * baseScale);
+    ctx.fillText('Content video flips inside this macOS tab', tabX + tabW / 2, contentY + contentH / 2 + 18 * baseScale);
   }
 
   ctx.restore();
@@ -206,7 +212,147 @@ export function renderStudioFrame({
   ctx.stroke();
   ctx.restore();
 
-  ctx.restore(); // Screen clip restore
+  ctx.restore(); // Restore Tab Animation Matrix
+  ctx.restore(); // Restore Screen Clip
+}
+
+function applyTabAnimation(
+  ctx: CanvasRenderingContext2D,
+  animType: TabAnimationType,
+  intervalSeconds: number,
+  speedMultiplier: number,
+  time: number,
+  centerX: number,
+  centerY: number,
+  scale: number
+): { shadowElevation: number; shadowOffsetY: number } {
+  const interval = Math.max(1, intervalSeconds || 3);
+  const adjustedTime = time * (speedMultiplier || 1.0);
+
+  let shadowElevation = 0;
+  let shadowOffsetY = 0;
+
+  switch (animType) {
+    case '3d-flip-h': {
+      // 3D Horizontal Flip 360° every interval
+      const flipDuration = 0.9;
+      const cycle = adjustedTime % interval;
+      if (cycle < flipDuration) {
+        const p = cycle / flipDuration;
+        // Smooth ease-in-out quintic
+        const ease = p < 0.5 ? 16 * Math.pow(p, 5) : 1 - Math.pow(-2 * p + 2, 5) / 2;
+        const angle = ease * Math.PI * 2;
+        const scaleX = Math.cos(angle);
+        const scaleDepth = 1 - Math.abs(Math.sin(angle)) * 0.12;
+
+        ctx.translate(centerX, centerY);
+        ctx.scale(scaleX * scaleDepth, scaleDepth);
+        ctx.translate(-centerX, -centerY);
+
+        shadowElevation = Math.abs(Math.sin(angle)) * 30;
+        shadowOffsetY = Math.abs(Math.sin(angle)) * 14;
+      }
+      break;
+    }
+
+    case '3d-flip-v': {
+      // 3D Vertical Flip 360° every interval
+      const flipDuration = 0.9;
+      const cycle = adjustedTime % interval;
+      if (cycle < flipDuration) {
+        const p = cycle / flipDuration;
+        const ease = p < 0.5 ? 16 * Math.pow(p, 5) : 1 - Math.pow(-2 * p + 2, 5) / 2;
+        const angle = ease * Math.PI * 2;
+        const scaleY = Math.cos(angle);
+        const scaleDepth = 1 - Math.abs(Math.sin(angle)) * 0.12;
+
+        ctx.translate(centerX, centerY);
+        ctx.scale(scaleDepth, scaleY * scaleDepth);
+        ctx.translate(-centerX, -centerY);
+
+        shadowElevation = Math.abs(Math.sin(angle)) * 30;
+        shadowOffsetY = Math.abs(Math.sin(angle)) * 14;
+      }
+      break;
+    }
+
+    case 'floating-wave': {
+      // Continuous smooth floating drift and subtle perspective tilt
+      const floatY = Math.sin((adjustedTime * 2 * Math.PI) / interval) * 16 * scale;
+      const floatX = Math.cos((adjustedTime * Math.PI) / interval) * 6 * scale;
+      const tilt = Math.sin((adjustedTime * 2 * Math.PI) / interval) * 0.03; // ~1.8 deg tilt
+
+      ctx.translate(centerX + floatX, centerY + floatY);
+      ctx.rotate(tilt);
+      ctx.translate(-centerX, -centerY);
+
+      shadowElevation = floatY * 0.8;
+      shadowOffsetY = floatY * 0.5;
+      break;
+    }
+
+    case 'pulse-bounce': {
+      // Periodic rhythmic pop bounce
+      const cycle = adjustedTime % interval;
+      if (cycle < 0.6) {
+        const p = cycle / 0.6;
+        const bounce = Math.sin(p * Math.PI) * Math.exp(-p * 1.8);
+        const s = 1 + bounce * 0.09;
+
+        ctx.translate(centerX, centerY);
+        ctx.scale(s, s);
+        ctx.translate(-centerX, -centerY);
+
+        shadowElevation = bounce * 25;
+      }
+      break;
+    }
+
+    case 'slide-snap': {
+      // Slide right and snap back
+      const slideDuration = 0.85;
+      const cycle = adjustedTime % interval;
+      if (cycle < slideDuration) {
+        const p = cycle / slideDuration;
+        const ease = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+        const slideOffset = Math.sin(ease * Math.PI) * 45 * scale;
+
+        ctx.translate(centerX + slideOffset, centerY);
+        ctx.translate(-centerX, -centerY);
+
+        shadowOffsetY = Math.abs(slideOffset) * 0.3;
+      }
+      break;
+    }
+
+    case 'spin-360': {
+      // Elastic 360 spin
+      const spinDuration = 0.95;
+      const cycle = adjustedTime % interval;
+      if (cycle < spinDuration) {
+        const p = cycle / spinDuration;
+        // Elastic spring easing
+        const c4 = (2 * Math.PI) / 3;
+        const ease = p === 0 ? 0 : p === 1 ? 1 : Math.pow(2, -10 * p) * Math.sin((p * 10 - 0.75) * c4) + 1;
+        const rot = ease * Math.PI * 2;
+        const s = 1 - Math.sin(p * Math.PI) * 0.15;
+
+        ctx.translate(centerX, centerY);
+        ctx.rotate(rot);
+        ctx.scale(s, s);
+        ctx.translate(-centerX, -centerY);
+
+        shadowElevation = 20;
+      }
+      break;
+    }
+
+    case 'none':
+    default:
+      break;
+  }
+
+  return { shadowElevation, shadowOffsetY };
 }
 
 function renderMacOsHeader(
@@ -224,7 +370,6 @@ function renderMacOsHeader(
   const isLight = style === 'safari-sonoma-light';
   const isGlass = style === 'glass-frost-mac';
 
-  // Header Background
   if (isLight) {
     ctx.fillStyle = '#e8ecf2';
   } else if (isGlass) {
@@ -232,12 +377,10 @@ function renderMacOsHeader(
   } else if (style === 'chrome-macos') {
     ctx.fillStyle = '#1f2024';
   } else {
-    // safari-sonoma-dark & minimal-mac
     ctx.fillStyle = '#1e1f24';
   }
   ctx.fillRect(x, y, w, h);
 
-  // Bottom Border Line
   ctx.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.08)';
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -245,7 +388,7 @@ function renderMacOsHeader(
   ctx.lineTo(x + w, y + h);
   ctx.stroke();
 
-  // 1. macOS Traffic Lights (Red, Yellow, Green)
+  // Traffic lights
   const dotR = 5.5 * scale;
   const startX = x + 18 * scale;
   const centerY = y + h / 2;
@@ -267,15 +410,12 @@ function renderMacOsHeader(
     ctx.stroke();
   });
 
-  // 2. Window URL Bar or Tab Header
   if (style === 'minimal-mac') {
-    // Centered Window Title
     ctx.fillStyle = isLight ? '#0f172a' : '#f8fafc';
     ctx.font = `600 ${Math.floor(13 * scale)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillText(title || 'Studio Tab', x + w / 2, centerY + 4 * scale);
   } else {
-    // Safari / Chrome URL Pill
     const pillW = Math.min(w * 0.54, 460 * scale);
     const pillH = 24 * scale;
     const pillX = x + (w - pillW) / 2;
@@ -288,7 +428,6 @@ function renderMacOsHeader(
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    // Lock Icon
     const lockX = pillX + 12 * scale;
     ctx.fillStyle = isLight ? '#64748b' : '#94a3b8';
     ctx.beginPath();
@@ -296,7 +435,6 @@ function renderMacOsHeader(
     ctx.stroke();
     ctx.fillRect(lockX - 3.5 * scale, centerY - 1 * scale, 7 * scale, 6 * scale);
 
-    // Text inside URL Pill
     const text = url || title || 'studio.app/tab-view';
     ctx.font = `500 ${Math.floor(11 * scale)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
     ctx.fillStyle = isLight ? '#334155' : '#cbd5e1';
