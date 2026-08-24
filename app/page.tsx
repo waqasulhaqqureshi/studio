@@ -1,22 +1,21 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { StudioState } from '@/lib/types';
+import { StudioState, MacOsFrameStyle } from '@/lib/types';
 import { renderStudioFrame } from '@/lib/canvasRenderer';
 import { StudioVideoExporter, ExportProgress } from '@/lib/videoExporter';
 import { 
   Upload, 
-  Film, 
-  RotateCcw, 
   Download, 
   Camera, 
   Tablet, 
   CheckCircle2, 
-  Sliders, 
-  FileVideo,
-  X,
-  Loader2,
-  Trash2
+  X, 
+  Loader2, 
+  Trash2,
+  Sparkles,
+  Globe,
+  HardDrive
 } from 'lucide-react';
 
 const INITIAL_STATE: StudioState = {
@@ -24,27 +23,32 @@ const INITIAL_STATE: StudioState = {
   tabVideoName: '',
   bgVideoUrl: null,
   bgVideoName: '',
-  tabWidthScale: 0.76,
-  tabRadius: 18,
-  tabShadow: 'deep',
-  tabBorder: true,
-  tabStyle: 'minimal-card',
-  bgBlur: 6,
-  bgDim: 0.15,
+  macFrameStyle: 'safari-sonoma-dark',
+  tabTitle: 'studio.app',
+  tabUrl: 'https://studio.app/preview',
   showTabletBezel: true,
   duration: 10,
   currentTime: 0,
+  isExporting: false,
 };
+
+const MAC_STYLES: { id: MacOsFrameStyle; name: string; desc: string }[] = [
+  { id: 'safari-sonoma-dark', name: 'Safari Sonoma Dark', desc: 'macOS Dark Safari with URL pill' },
+  { id: 'safari-sonoma-light', name: 'Safari Sonoma Light', desc: 'macOS Light Safari with frosted header' },
+  { id: 'chrome-macos', name: 'Chrome macOS', desc: 'Modern macOS Chrome window frame' },
+  { id: 'glass-frost-mac', name: 'Glass Frost macOS', desc: 'Translucent frosted glass window' },
+  { id: 'minimal-mac', name: 'Minimal macOS', desc: 'Clean titlebar with traffic lights' },
+];
 
 export default function StudioPage() {
   const [state, setState] = useState<StudioState>(INITIAL_STATE);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Export state
-  const [isExporting, setIsExporting] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [finalSizeMb, setFinalSizeMb] = useState<string | null>(null);
 
   // Hidden video elements and canvas refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -62,7 +66,7 @@ export default function StudioPage() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Sync video URLs and automatically play them continuously
+  // Sync video URLs
   useEffect(() => {
     const bg = bgVideoRef.current;
     if (bg && state.bgVideoUrl) {
@@ -71,10 +75,10 @@ export default function StudioPage() {
         bg.muted = true;
         bg.loop = true;
         bg.load();
-        bg.play().catch(() => {});
+        if (!state.isExporting) bg.play().catch(() => {});
       }
     }
-  }, [state.bgVideoUrl]);
+  }, [state.bgVideoUrl, state.isExporting]);
 
   useEffect(() => {
     const tab = tabVideoRef.current;
@@ -84,13 +88,29 @@ export default function StudioPage() {
         tab.muted = true;
         tab.loop = true;
         tab.load();
-        tab.play().catch(() => {});
+        if (!state.isExporting) tab.play().catch(() => {});
       }
     }
-  }, [state.tabVideoUrl]);
+  }, [state.tabVideoUrl, state.isExporting]);
 
-  // Main 60 FPS Canvas Render Loop (Always continuously running)
+  // Pause / Resume preview during export
   useEffect(() => {
+    const bg = bgVideoRef.current;
+    const tab = tabVideoRef.current;
+
+    if (state.isExporting) {
+      if (bg && !bg.paused) bg.pause();
+      if (tab && !tab.paused) tab.pause();
+    } else {
+      if (bg && bg.src && bg.paused) bg.play().catch(() => {});
+      if (tab && tab.src && tab.paused) tab.play().catch(() => {});
+    }
+  }, [state.isExporting]);
+
+  // 60 FPS Canvas Render Loop (Active when not exporting)
+  useEffect(() => {
+    if (state.isExporting) return; // Freeze preview loop while exporting for max rendering performance
+
     let animId: number;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -106,11 +126,10 @@ export default function StudioPage() {
 
       let curTime = state.currentTime;
 
-      // Keep videos playing automatically
-      if (tab && tab.src && tab.paused && !tab.error) {
+      if (tab && tab.src && tab.paused && !tab.error && !state.isExporting) {
         tab.play().catch(() => {});
       }
-      if (bg && bg.src && bg.paused && !bg.error) {
+      if (bg && bg.src && bg.paused && !bg.error && !state.isExporting) {
         bg.play().catch(() => {});
       }
 
@@ -141,26 +160,26 @@ export default function StudioPage() {
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [state]);
+  }, [state.isExporting, state.macFrameStyle, state.showTabletBezel, state.tabTitle, state.tabUrl]);
 
-  // Update duration when tab video metadata is loaded
+  // Update duration when tab metadata loads
   const handleTabLoadedMetadata = useCallback(() => {
     const tab = tabVideoRef.current;
     if (tab && tab.duration && !isNaN(tab.duration)) {
       const dur = tab.duration;
       setState((prev) => ({ ...prev, duration: Math.max(1, Math.round(dur * 10) / 10) }));
-      tab.play().catch(() => {});
+      if (!state.isExporting) tab.play().catch(() => {});
     }
-  }, []);
+  }, [state.isExporting]);
 
   const handleBgLoadedMetadata = useCallback(() => {
     const bg = bgVideoRef.current;
     if (bg && bg.duration && !isNaN(bg.duration)) {
-      bg.play().catch(() => {});
+      if (!state.isExporting) bg.play().catch(() => {});
     }
-  }, []);
+  }, [state.isExporting]);
 
-  // Upload Handlers (File Input & Drag & Drop)
+  // Upload Handlers
   const handleTabFileUpload = (file: File) => {
     const url = URL.createObjectURL(file);
     setState((prev) => ({
@@ -185,22 +204,14 @@ export default function StudioPage() {
 
   const handleRemoveTabVideo = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setState((prev) => ({
-      ...prev,
-      tabVideoUrl: null,
-      tabVideoName: '',
-    }));
+    setState((prev) => ({ ...prev, tabVideoUrl: null, tabVideoName: '' }));
     if (tabVideoRef.current) tabVideoRef.current.src = '';
     showToast('Tab video removed');
   };
 
   const handleRemoveBgVideo = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setState((prev) => ({
-      ...prev,
-      bgVideoUrl: null,
-      bgVideoName: '',
-    }));
+    setState((prev) => ({ ...prev, bgVideoUrl: null, bgVideoName: '' }));
     if (bgVideoRef.current) bgVideoRef.current.src = '';
     showToast('Background video removed');
   };
@@ -213,7 +224,7 @@ export default function StudioPage() {
 
     const a = document.createElement('a');
     a.href = dataUrl;
-    a.download = `video-tab-mockup-${Date.now()}.png`;
+    a.download = `macos-tab-mockup-${Date.now()}.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -222,8 +233,9 @@ export default function StudioPage() {
 
   // Video Export Handler
   const handleStartExport = async () => {
-    setIsExporting(true);
+    setState((prev) => ({ ...prev, isExporting: true }));
     setDownloadUrl(null);
+    setFinalSizeMb(null);
 
     const exporter = new StudioVideoExporter();
     exporterRef.current = exporter;
@@ -233,12 +245,16 @@ export default function StudioPage() {
         state,
         bgVideoRef.current,
         tabVideoRef.current,
-        (p) => setExportProgress(p)
+        (p) => {
+          setExportProgress(p);
+          if (p.blobSizeMb) setFinalSizeMb(p.blobSizeMb);
+        }
       );
       setDownloadUrl(result.blobUrl);
-      setIsExporting(false);
+      setFinalSizeMb(result.sizeMb);
+      setState((prev) => ({ ...prev, isExporting: false }));
     } catch (err: any) {
-      setIsExporting(false);
+      setState((prev) => ({ ...prev, isExporting: false }));
       setExportProgress({
         progress: 0,
         status: 'error',
@@ -247,21 +263,22 @@ export default function StudioPage() {
     }
   };
 
+  const handleCloseExportModal = () => {
+    if (state.isExporting && exporterRef.current) {
+      exporterRef.current.cancel();
+    }
+    setState((prev) => ({ ...prev, isExporting: false }));
+    setShowExportModal(false);
+  };
+
   const handleDownloadExportedVideo = () => {
     if (!downloadUrl) return;
     const a = document.createElement('a');
     a.href = downloadUrl;
-    a.download = `studio-tab-mockup-${Date.now()}.webm`;
+    a.download = `macos-tab-studio-${Date.now()}.webm`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-  };
-
-  const formatTime = (secs: number) => {
-    const s = Math.max(0, secs);
-    const m = Math.floor(s / 60);
-    const sec = Math.floor(s % 60);
-    return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -296,7 +313,7 @@ export default function StudioPage() {
             <div className="flex items-center space-x-2">
               <span className="font-bold text-sm text-white">VideoTab Studio</span>
               <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30">
-                3:4 Tab Mockup
+                macOS Tab Mockup
               </span>
             </div>
           </div>
@@ -319,6 +336,7 @@ export default function StudioPage() {
               setShowExportModal(true);
               setDownloadUrl(null);
               setExportProgress(null);
+              setFinalSizeMb(null);
             }}
             className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-lg shadow-sky-600/20 transition-all flex items-center space-x-1.5 active:scale-95"
           >
@@ -332,7 +350,6 @@ export default function StudioPage() {
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         {/* Left / Center Canvas Preview Stage */}
         <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 bg-neutral-950/80 relative overflow-hidden">
-          {/* Subtle Background Canvas Grid */}
           <div className="absolute inset-0 bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:24px_24px] opacity-20 pointer-events-none"></div>
 
           {/* 3:4 Portrait Canvas Container */}
@@ -353,7 +370,7 @@ export default function StudioPage() {
           </div>
         </div>
 
-        {/* Right Sidebar: Simple, Focused & Practical */}
+        {/* Right Sidebar: Clean, Ultra-Solid macOS Frame Controls */}
         <div className="w-full md:w-88 lg:w-96 border-t md:border-t-0 md:border-l border-neutral-800 bg-neutral-950 p-5 overflow-y-auto custom-scrollbar space-y-5 shrink-0 z-10">
           
           {/* SECTION 1: Up Layer (Tab Content Video) */}
@@ -376,10 +393,9 @@ export default function StudioPage() {
               )}
             </div>
             <p className="text-[11px] text-neutral-400">
-              Plays inside the centered tab. Outer area is completely transparent.
+              Plays inside the centered macOS window tab.
             </p>
 
-            {/* Tab Video Upload Dropzone */}
             <input
               ref={tabFileInputRef}
               type="file"
@@ -396,7 +412,7 @@ export default function StudioPage() {
                 const file = e.dataTransfer.files?.[0];
                 if (file) handleTabFileUpload(file);
               }}
-              className={`border-2 border-dashed rounded-xl p-3.5 text-center cursor-pointer transition-all group ${
+              className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all group ${
                 state.tabVideoName
                   ? 'border-sky-500/60 bg-sky-950/20 hover:bg-sky-950/30'
                   : 'border-neutral-700 hover:border-sky-500/80 bg-neutral-950/60 hover:bg-neutral-900/80'
@@ -409,40 +425,6 @@ export default function StudioPage() {
               <p className="text-[10px] text-neutral-400 mt-0.5 truncate max-w-[240px] mx-auto font-mono">
                 {state.tabVideoName || 'Click or drag video file here'}
               </p>
-            </div>
-
-            {/* Tab Sizing Slider */}
-            <div className="space-y-1.5 pt-1">
-              <div className="flex justify-between text-xs text-neutral-400">
-                <span>Tab Size</span>
-                <span className="font-mono text-sky-400">{Math.round(state.tabWidthScale * 100)}%</span>
-              </div>
-              <input
-                type="range"
-                min="0.60"
-                max="0.94"
-                step="0.02"
-                value={state.tabWidthScale}
-                onChange={(e) => setState((p) => ({ ...p, tabWidthScale: parseFloat(e.target.value) }))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
-              />
-            </div>
-
-            {/* Corner Radius */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs text-neutral-400">
-                <span>Corner Rounding</span>
-                <span className="font-mono text-sky-400">{state.tabRadius}px</span>
-              </div>
-              <input
-                type="range"
-                min="8"
-                max="36"
-                step="2"
-                value={state.tabRadius}
-                onChange={(e) => setState((p) => ({ ...p, tabRadius: parseInt(e.target.value) }))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
-              />
             </div>
           </div>
 
@@ -466,10 +448,9 @@ export default function StudioPage() {
               )}
             </div>
             <p className="text-[11px] text-neutral-400">
-              Fills the entire 3:4 background behind the floating tab.
+              Fills the background area behind the macOS tab.
             </p>
 
-            {/* Background Video Upload Dropzone */}
             <input
               ref={bgFileInputRef}
               type="file"
@@ -486,7 +467,7 @@ export default function StudioPage() {
                 const file = e.dataTransfer.files?.[0];
                 if (file) handleBgFileUpload(file);
               }}
-              className={`border-2 border-dashed rounded-xl p-3.5 text-center cursor-pointer transition-all group ${
+              className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all group ${
                 state.bgVideoName
                   ? 'border-indigo-500/60 bg-indigo-950/20 hover:bg-indigo-950/30'
                   : 'border-neutral-700 hover:border-indigo-500/80 bg-neutral-950/60 hover:bg-neutral-900/80'
@@ -500,51 +481,63 @@ export default function StudioPage() {
                 {state.bgVideoName || 'Click or drag video file here'}
               </p>
             </div>
-
-            {/* Background Blur */}
-            <div className="space-y-1.5 pt-1">
-              <div className="flex justify-between text-xs text-neutral-400">
-                <span>Background Blur</span>
-                <span className="font-mono text-indigo-400">{state.bgBlur}px</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="30"
-                step="1"
-                value={state.bgBlur}
-                onChange={(e) => setState((p) => ({ ...p, bgBlur: parseInt(e.target.value) }))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-              />
-            </div>
-
-            {/* Dim / Darken */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs text-neutral-400">
-                <span>Darken Background</span>
-                <span className="font-mono text-indigo-400">{Math.round(state.bgDim * 100)}%</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="0.8"
-                step="0.05"
-                value={state.bgDim}
-                onChange={(e) => setState((p) => ({ ...p, bgDim: parseFloat(e.target.value) }))}
-                className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-              />
-            </div>
           </div>
 
-          {/* SECTION 3: Device Frame Style */}
+          {/* SECTION 3: Authentic macOS Tab Frame Styles */}
           <div className="space-y-3 bg-neutral-900/60 p-4 rounded-xl border border-neutral-800/80">
             <h3 className="font-bold text-xs uppercase tracking-wider text-white">
-              3. Frame & Bezel
+              3. macOS Window Frame
             </h3>
 
-            {/* Tablet Bezel Toggle */}
-            <div className="flex items-center justify-between text-xs text-neutral-300">
-              <span>Outer Tablet Bezel</span>
+            <div className="space-y-2">
+              {MAC_STYLES.map((style) => {
+                const isSelected = state.macFrameStyle === style.id;
+                return (
+                  <button
+                    key={style.id}
+                    onClick={() => setState((p) => ({ ...p, macFrameStyle: style.id }))}
+                    className={`w-full text-left p-2.5 rounded-xl border transition-all flex items-center justify-between ${
+                      isSelected
+                        ? 'bg-sky-950/50 border-sky-500 text-white shadow-md shadow-sky-500/10'
+                        : 'bg-neutral-950 border-neutral-800/80 text-neutral-400 hover:text-white hover:bg-neutral-900'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        {/* Traffic light icon preview */}
+                        <div className="flex items-center space-x-1">
+                          <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                          <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
+                          <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                        </div>
+                        <span className="text-xs font-semibold text-white">{style.name}</span>
+                      </div>
+                      <p className="text-[10px] text-neutral-500 mt-0.5 pl-7">{style.desc}</p>
+                    </div>
+                    {isSelected && <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Custom URL Pill / Title Input */}
+            <div className="space-y-1.5 pt-2 border-t border-neutral-800/80">
+              <label className="text-[11px] text-neutral-400 flex items-center space-x-1">
+                <Globe className="w-3 h-3 text-sky-400" />
+                <span>macOS URL Bar Text</span>
+              </label>
+              <input
+                type="text"
+                value={state.tabUrl}
+                onChange={(e) => setState((p) => ({ ...p, tabUrl: e.target.value }))}
+                placeholder="https://studio.app/preview"
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-sky-500 font-mono"
+              />
+            </div>
+
+            {/* Tablet Device Frame Toggle */}
+            <div className="flex items-center justify-between pt-2 border-t border-neutral-800/80 text-xs text-neutral-300">
+              <span>Outer Device Bezel</span>
               <button
                 onClick={() => setState((p) => ({ ...p, showTabletBezel: !p.showTabletBezel }))}
                 className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
@@ -554,64 +547,42 @@ export default function StudioPage() {
                 {state.showTabletBezel ? 'ON' : 'OFF'}
               </button>
             </div>
-
-            {/* Tab Style */}
-            <div className="space-y-1.5 pt-1">
-              <span className="text-[11px] text-neutral-400">Tab Style</span>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { id: 'minimal-card', name: 'Clean Card' },
-                  { id: 'safari-dark', name: 'Safari Header' },
-                  { id: 'chrome-dark', name: 'Chrome Header' },
-                  { id: 'frameless', name: 'Frameless' },
-                ].map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => setState((p) => ({ ...p, tabStyle: s.id as any }))}
-                    className={`py-1.5 rounded-lg text-xs font-medium transition-all ${
-                      state.tabStyle === s.id
-                        ? 'bg-sky-600 text-white font-semibold'
-                        : 'bg-neutral-800 text-neutral-400 hover:text-white'
-                    }`}
-                  >
-                    {s.name}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       </div>
 
-      {/* Export Modal */}
+      {/* Export Modal with Total MBs Display & Lossless Compression */}
       {showExportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
-              <h3 className="font-bold text-base text-white">Export 3:4 Video</h3>
+              <div className="flex items-center space-x-2">
+                <Download className="w-4 h-4 text-sky-400" />
+                <h3 className="font-bold text-base text-white">Export 3:4 Video</h3>
+              </div>
               <button
-                onClick={() => setShowExportModal(false)}
-                disabled={isExporting}
-                className="p-1 rounded-lg text-neutral-400 hover:text-white"
+                onClick={handleCloseExportModal}
+                disabled={state.isExporting}
+                className="p-1 rounded-lg text-neutral-400 hover:text-white disabled:opacity-40"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {!isExporting && !downloadUrl && (
+            {!state.isExporting && !downloadUrl && (
               <div className="space-y-4">
-                <div className="bg-neutral-950 p-3.5 rounded-xl border border-neutral-800 text-xs space-y-1.5 text-neutral-300">
+                <div className="bg-neutral-950 p-3.5 rounded-xl border border-neutral-800 text-xs space-y-2 text-neutral-300">
                   <div className="flex justify-between">
                     <span className="text-neutral-400">Resolution:</span>
                     <span className="font-mono text-white">1080 × 1440 (3:4 HD)</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-neutral-400">Framerate:</span>
-                    <span className="font-mono text-white">60 FPS Lossless</span>
+                    <span className="text-neutral-400">Compression:</span>
+                    <span className="font-mono text-emerald-400">Smart VP9 High-Efficiency</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-neutral-400">Audio:</span>
-                    <span className="text-neutral-400 font-mono">None (Clean Silent Video)</span>
+                    <span className="text-neutral-400">Preview Engine:</span>
+                    <span className="font-mono text-sky-400">Auto-Paused During Render</span>
                   </div>
                 </div>
 
@@ -620,17 +591,17 @@ export default function StudioPage() {
                   className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-sky-600/30 flex items-center justify-center space-x-2 transition-all"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Start Video Render</span>
+                  <span>Start Render</span>
                 </button>
               </div>
             )}
 
-            {isExporting && exportProgress && (
+            {state.isExporting && exportProgress && (
               <div className="py-6 text-center space-y-4">
                 <Loader2 className="w-8 h-8 mx-auto text-sky-400 animate-spin" />
                 <div>
-                  <h4 className="font-bold text-sm text-white">Rendering 3:4 Composition...</h4>
-                  <p className="text-xs text-neutral-400 mt-1">Merging tab video and background layer frame-by-frame</p>
+                  <h4 className="font-bold text-sm text-white">Rendering & Compressing...</h4>
+                  <p className="text-xs text-neutral-400 mt-1">Live preview is paused for maximum encoding speed</p>
                 </div>
                 <div className="w-full h-2.5 bg-neutral-800 rounded-full overflow-hidden">
                   <div
@@ -647,15 +618,23 @@ export default function StudioPage() {
                 <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-400" />
                 <div>
                   <h4 className="font-bold text-sm text-white">Render Completed!</h4>
-                  <p className="text-xs text-neutral-400 mt-0.5">Your 3:4 video is ready.</p>
+                  {finalSizeMb && (
+                    <div className="mt-2 inline-flex items-center space-x-1.5 bg-emerald-950/60 border border-emerald-500/40 px-3 py-1 rounded-full">
+                      <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-xs font-bold text-emerald-300 font-mono">
+                        Total File Size: {finalSizeMb}
+                      </span>
+                    </div>
+                  )}
                 </div>
+
                 <div className="grid grid-cols-2 gap-2 pt-2">
                   <button
                     onClick={handleDownloadExportedVideo}
                     className="py-2.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center justify-center space-x-1.5 shadow-md shadow-sky-600/20"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Download</span>
+                    <span>Download Video</span>
                   </button>
                   <button
                     onClick={() => {

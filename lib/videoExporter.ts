@@ -6,7 +6,8 @@ export interface ExportProgress {
   status: 'initializing' | 'rendering' | 'encoding' | 'completed' | 'error';
   errorMessage?: string;
   blobUrl?: string;
-  blobSize?: number;
+  blobSizeMb?: string;
+  blobSizeBytes?: number;
 }
 
 export class StudioVideoExporter {
@@ -21,7 +22,7 @@ export class StudioVideoExporter {
     bgVideo: HTMLVideoElement | null,
     tabVideo: HTMLVideoElement | null,
     onProgress: (info: ExportProgress) => void
-  ): Promise<{ blob: Blob; blobUrl: string }> {
+  ): Promise<{ blob: Blob; blobUrl: string; sizeMb: string }> {
     this.isCancelled = false;
 
     return new Promise(async (resolve, reject) => {
@@ -37,9 +38,9 @@ export class StudioVideoExporter {
         const ctx = exportCanvas.getContext('2d', { alpha: false });
         if (!ctx) throw new Error('Canvas 2D context creation failed');
 
-        // Pure video stream (no audio)
         const canvasStream = exportCanvas.captureStream(60);
 
+        // High-efficiency VP9/H264 codec selection
         const mimeTypes = [
           'video/webm;codecs=vp9',
           'video/webm;codecs=vp8',
@@ -54,9 +55,10 @@ export class StudioVideoExporter {
           }
         }
 
+        // Optimized dynamic bitrate compression (4.5 Mbps keeps 1080x1440 sharp without bloated size)
         const mediaRecorder = new MediaRecorder(canvasStream, {
           mimeType: chosenMime || undefined,
-          videoBitsPerSecond: 8000000,
+          videoBitsPerSecond: 4500000,
         });
 
         const recordedChunks: Blob[] = [];
@@ -98,14 +100,16 @@ export class StudioVideoExporter {
             mediaRecorder.onstop = () => {
               const blob = new Blob(recordedChunks, { type: chosenMime || 'video/webm' });
               const blobUrl = URL.createObjectURL(blob);
+              const sizeMb = (blob.size / (1024 * 1024)).toFixed(2) + ' MB';
 
               onProgress({
                 progress: 100,
                 status: 'completed',
                 blobUrl,
-                blobSize: blob.size,
+                blobSizeMb: sizeMb,
+                blobSizeBytes: blob.size,
               });
-              resolve({ blob, blobUrl });
+              resolve({ blob, blobUrl, sizeMb });
             };
             mediaRecorder.stop();
             return;
