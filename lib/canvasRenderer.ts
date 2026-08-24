@@ -19,8 +19,12 @@ export function renderStudioFrame({
   width,
   height,
 }: RenderOptions) {
+  // Clear full canvas preserving 100% alpha transparency
+  ctx.clearRect(0, 0, width, height);
+
   const baseScale = width / 1080;
   const isBezel = state.showTabletBezel;
+  const hasBgVideo = Boolean(state.bgVideoUrl && bgVideo);
 
   // Tablet Device Outer Bezel & Screen Dimensions
   const outerPad = isBezel ? Math.round(12 * baseScale) : 0;
@@ -33,7 +37,7 @@ export function renderStudioFrame({
   const outerRadius = isBezel ? Math.round(48 * baseScale) : 0;
 
   // -------------------------------------------------------------
-  // 1. Tablet Device Outer Bezel
+  // 1. Tablet Device Outer Bezel (Only if enabled)
   // -------------------------------------------------------------
   if (isBezel) {
     ctx.save();
@@ -66,7 +70,7 @@ export function renderStudioFrame({
   }
 
   // -------------------------------------------------------------
-  // 2. Screen Area Mask
+  // 2. Screen Area Mask (if bezel is enabled)
   // -------------------------------------------------------------
   ctx.save();
   if (isBezel) {
@@ -75,55 +79,40 @@ export function renderStudioFrame({
   }
 
   // -------------------------------------------------------------
-  // 3. LAYER 1: DOWN (BACKGROUND VIDEO)
+  // 3. LAYER 1: DOWN (BACKGROUND VIDEO - ONLY DRAWN IF LOADED)
+  // If no background video is loaded, this layer is 100% TRANSPARENT!
   // -------------------------------------------------------------
-  ctx.save();
-  ctx.filter = `blur(${6 * baseScale}px)`;
+  if (hasBgVideo && bgVideo) {
+    ctx.save();
+    ctx.filter = `blur(${6 * baseScale}px)`;
 
-  let bgDrawn = false;
-  if (bgVideo && (bgVideo.readyState >= 1 || bgVideo.currentTime > 0) && !bgVideo.error) {
-    try {
-      const vWidth = bgVideo.videoWidth || 1920;
-      const vHeight = bgVideo.videoHeight || 1080;
+    if ((bgVideo.readyState >= 1 || bgVideo.currentTime > 0) && !bgVideo.error) {
+      try {
+        const vWidth = bgVideo.videoWidth || 1920;
+        const vHeight = bgVideo.videoHeight || 1080;
 
-      const hRatio = screenW / vWidth;
-      const vRatio = screenH / vHeight;
-      const ratio = Math.max(hRatio, vRatio) * 1.08;
-      const drawW = vWidth * ratio;
-      const drawH = vHeight * ratio;
-      const drawX = screenX + (screenW - drawW) / 2;
-      const drawY = screenY + (screenH - drawH) / 2;
+        const hRatio = screenW / vWidth;
+        const vRatio = screenH / vHeight;
+        const ratio = Math.max(hRatio, vRatio) * 1.08;
+        const drawW = vWidth * ratio;
+        const drawH = vHeight * ratio;
+        const drawX = screenX + (screenW - drawW) / 2;
+        const drawY = screenY + (screenH - drawH) / 2;
 
-      ctx.drawImage(bgVideo, drawX, drawY, drawW, drawH);
-      bgDrawn = true;
-    } catch {
-      bgDrawn = false;
+        ctx.drawImage(bgVideo, drawX, drawY, drawW, drawH);
+      } catch {}
     }
-  }
 
-  // Only draw fallback if no video is selected at all
-  if (!bgDrawn && !state.bgVideoUrl) {
-    const grad = ctx.createLinearGradient(screenX, screenY, screenX + screenW, screenY + screenH);
-    grad.addColorStop(0, '#1e293b');
-    grad.addColorStop(0.5, '#0f172a');
-    grad.addColorStop(1, '#020617');
-    ctx.fillStyle = grad;
+    ctx.restore();
+
+    // Subtle dark overlay only when background video exists
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
     ctx.fillRect(screenX, screenY, screenW, screenH);
-
-    ctx.fillStyle = 'rgba(148, 163, 184, 0.4)';
-    ctx.font = `600 ${Math.floor(22 * baseScale)}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText('⬇️ Upload Down Video (Background)', screenX + screenW / 2, screenY + screenH * 0.22);
   }
-
-  ctx.restore();
-
-  // Subtle dark overlay
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-  ctx.fillRect(screenX, screenY, screenW, screenH);
 
   // -------------------------------------------------------------
   // 4. LAYER 2: UP (ANIMATED FLIPPING macOS TAB + CONTENT VIDEO)
+  // Everything outside this tab remains 100% alpha transparent!
   // -------------------------------------------------------------
   const tabW = Math.round(screenW * 0.78);
   const headerH = Math.round(44 * baseScale);
@@ -140,7 +129,7 @@ export function renderStudioFrame({
   ctx.save();
   const animInfo = applyTabAnimation(ctx, state.animationType, state.flipInterval, state.animationSpeed, time, centerX, centerY, baseScale);
 
-  // 3D Elevation Dynamic Shadow
+  // 3D Elevation Dynamic Drop Shadow
   ctx.save();
   ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
   ctx.shadowBlur = Math.max(16, (48 + animInfo.shadowElevation) * baseScale);
@@ -151,7 +140,7 @@ export function renderStudioFrame({
   ctx.fill();
   ctx.restore();
 
-  // Clip Entire Window for Content & Header
+  // Clip Entire Window for Header & Video Content
   ctx.save();
   drawPerfectRoundedRect(ctx, tabX, tabY, tabW, tabH, radius);
   ctx.clip();
@@ -185,7 +174,7 @@ export function renderStudioFrame({
     }
   }
 
-  // Only draw placeholder text if no video source is selected at all
+  // Only draw placeholder text if no video source is selected
   if (!tabDrawn && !state.tabVideoUrl) {
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(tabX, contentY, tabW, contentH);
@@ -234,7 +223,6 @@ function applyTabAnimation(
 
   switch (animType) {
     case '3d-flip-h': {
-      // 3D Horizontal Flip 360° every interval
       const flipDuration = 0.9;
       const cycle = adjustedTime % interval;
       if (cycle < flipDuration) {
@@ -255,7 +243,6 @@ function applyTabAnimation(
     }
 
     case '3d-flip-v': {
-      // 3D Vertical Flip 360° every interval
       const flipDuration = 0.9;
       const cycle = adjustedTime % interval;
       if (cycle < flipDuration) {

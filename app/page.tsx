@@ -22,7 +22,9 @@ import {
   Repeat,
   CheckSquare,
   Square,
-  FileVideo
+  FileVideo,
+  Sparkles,
+  Layers
 } from 'lucide-react';
 
 const INITIAL_STATE: StudioState = {
@@ -76,6 +78,7 @@ export default function StudioPage() {
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [finalSizeMb, setFinalSizeMb] = useState<string | null>(null);
+  const [exportedHasAlpha, setExportedHasAlpha] = useState(false);
 
   // Hidden video elements and canvas refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -134,13 +137,13 @@ export default function StudioPage() {
     }
   }, [state.isExporting]);
 
-  // Ultra-Smooth 60 FPS Decoupled Canvas Loop (Zero Blink, Zero Flash)
+  // Ultra-Smooth 60 FPS Decoupled Canvas Loop with Alpha Channel
   useEffect(() => {
     let animId: number;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d', { alpha: false });
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
     const startTime = performance.now();
@@ -235,10 +238,10 @@ export default function StudioPage() {
     e.stopPropagation();
     setState((prev) => ({ ...prev, bgVideoUrl: null, bgVideoName: '' }));
     if (bgVideoRef.current) bgVideoRef.current.src = '';
-    showToast('Background video removed');
+    showToast('Background video excluded — Alpha Transparency Active');
   };
 
-  // HD Poster Screenshot
+  // HD Poster Screenshot (preserves transparent background if no bg video)
   const handleCaptureScreenshot = () => {
     const exporter = new StudioVideoExporter();
     const dataUrl = exporter.captureStillFrame(stateRef.current, bgVideoRef.current, tabVideoRef.current);
@@ -250,7 +253,7 @@ export default function StudioPage() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    showToast('HD 3:4 Poster Frame (PNG) downloaded!');
+    showToast('HD 3:4 Poster Frame (PNG) downloaded with transparency!');
   };
 
   // Video Export Handler
@@ -274,6 +277,7 @@ export default function StudioPage() {
       );
       setDownloadUrl(result.blobUrl);
       setFinalSizeMb(result.sizeMb);
+      setExportedHasAlpha(result.hasAlpha);
       setState((prev) => ({ ...prev, isExporting: false }));
     } catch (err: any) {
       setState((prev) => ({ ...prev, isExporting: false }));
@@ -295,15 +299,18 @@ export default function StudioPage() {
 
   const handleDownloadExportedVideo = () => {
     if (!downloadUrl) return;
+    const isAlpha = !state.bgVideoUrl;
+    const ext = isAlpha ? 'webm' : state.exportFormat;
     const a = document.createElement('a');
     a.href = downloadUrl;
-    a.download = `macos-tab-studio-${Date.now()}.${state.exportFormat}`;
+    a.download = `macos-tab-studio-${isAlpha ? 'alpha-transparent-' : ''}${Date.now()}.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
   };
 
   const expectedSizeMb = StudioVideoExporter.getExpectedSizeMb(state.duration, state.compressVideo);
+  const isTransparentAlphaActive = !state.bgVideoUrl;
 
   return (
     <div className="flex flex-col h-screen w-screen bg-neutral-950 text-neutral-100 font-sans select-none overflow-hidden">
@@ -339,6 +346,12 @@ export default function StudioPage() {
               <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30">
                 macOS Tab Flip
               </span>
+              {isTransparentAlphaActive && (
+                <span className="hidden sm:inline-flex items-center space-x-1 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  <Sparkles className="w-3 h-3" />
+                  <span>Alpha Transparent</span>
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -347,7 +360,7 @@ export default function StudioPage() {
           <button
             onClick={handleCaptureScreenshot}
             className="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white text-xs font-medium transition-all flex items-center space-x-1.5"
-            title="Download HD Poster PNG"
+            title="Download HD Poster PNG (with transparency)"
           >
             <Camera className="w-3.5 h-3.5 text-sky-400" />
             <span className="hidden sm:inline">Capture PNG</span>
@@ -372,14 +385,29 @@ export default function StudioPage() {
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         {/* Left Canvas Preview Stage */}
         <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 bg-neutral-950/80 relative overflow-hidden">
-          <div className="absolute inset-0 bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:24px_24px] opacity-20 pointer-events-none"></div>
+          {/* Transparent Checkerboard Pattern (reveals true alpha transparency when no bg video) */}
+          <div 
+            className="absolute inset-0 opacity-15 pointer-events-none"
+            style={{
+              backgroundImage: 'linear-gradient(45deg, #27272a 25%, transparent 25%), linear-gradient(-45deg, #27272a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #27272a 75%), linear-gradient(-45deg, transparent 75%, #27272a 75%)',
+              backgroundSize: '24px 24px',
+              backgroundPosition: '0 0, 0 12px, 12px -12px, -12px 0px'
+            }}
+          />
 
+          {/* 3:4 Portrait Canvas Container */}
           <div
-            className="relative shadow-2xl rounded-2xl overflow-hidden bg-black ring-1 ring-neutral-800 transition-all"
+            className="relative shadow-2xl rounded-2xl overflow-hidden ring-1 ring-neutral-800 transition-all"
             style={{
               aspectRatio: '3 / 4',
               maxHeight: 'calc(100% - 10px)',
               height: '100%',
+              backgroundImage: isTransparentAlphaActive 
+                ? 'linear-gradient(45deg, #18181b 25%, transparent 25%), linear-gradient(-45deg, #18181b 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #18181b 75%), linear-gradient(-45deg, transparent 75%, #18181b 75%)'
+                : undefined,
+              backgroundSize: '20px 20px',
+              backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
+              backgroundColor: isTransparentAlphaActive ? '#09090b' : '#000000',
             }}
           >
             <canvas
@@ -446,25 +474,35 @@ export default function StudioPage() {
             </div>
           </div>
 
-          {/* SECTION 2: Down Layer (Background Video) */}
+          {/* SECTION 2: Down Layer (Background Video & Alpha State) */}
           <div className="space-y-3 bg-neutral-900/60 p-4 rounded-xl border border-neutral-800/80">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 shadow-sm shadow-indigo-500"></div>
+                <div className={`w-2.5 h-2.5 rounded-full ${isTransparentAlphaActive ? 'bg-emerald-400 shadow-sm shadow-emerald-400' : 'bg-indigo-500'}`}></div>
                 <h3 className="font-bold text-xs uppercase tracking-wider text-white">
                   2. Down Video (Background)
                 </h3>
               </div>
-              {state.bgVideoName && (
+              {state.bgVideoName ? (
                 <button
                   onClick={handleRemoveBgVideo}
                   className="text-neutral-500 hover:text-red-400 transition-colors p-1"
-                  title="Remove video"
+                  title="Remove to make background transparent"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
+              ) : (
+                <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                  Transparent Alpha
+                </span>
               )}
             </div>
+
+            <p className="text-[11px] text-neutral-400">
+              {isTransparentAlphaActive 
+                ? 'No background video loaded: Tab is rendered with 100% Alpha Transparency.' 
+                : 'Fills the area behind the centered macOS tab.'}
+            </p>
 
             <input
               ref={bgFileInputRef}
@@ -485,15 +523,15 @@ export default function StudioPage() {
               className={`border-2 border-dashed rounded-xl p-3.5 text-center cursor-pointer transition-all group ${
                 state.bgVideoName
                   ? 'border-indigo-500/60 bg-indigo-950/20 hover:bg-indigo-950/30'
-                  : 'border-neutral-700 hover:border-indigo-500/80 bg-neutral-950/60 hover:bg-neutral-900/80'
+                  : 'border-neutral-700 hover:border-emerald-500/80 bg-neutral-950/60 hover:bg-neutral-900/80'
               }`}
             >
               <Upload className="w-5 h-5 mx-auto text-neutral-400 group-hover:text-indigo-400 transition-colors mb-1" />
               <p className="text-xs font-semibold text-neutral-200 group-hover:text-white">
-                {state.bgVideoName ? 'Replace Background Video' : 'Upload Background Video'}
+                {state.bgVideoName ? 'Replace Background Video' : 'Add Optional Background Video'}
               </p>
               <p className="text-[10px] text-neutral-400 mt-0.5 truncate max-w-[240px] mx-auto font-mono">
-                {state.bgVideoName || 'Click or drag video file here'}
+                {state.bgVideoName || 'Leave empty for transparent alpha background'}
               </p>
             </div>
           </div>
@@ -645,7 +683,7 @@ export default function StudioPage() {
         </div>
       </div>
 
-      {/* Export Modal with Format, Compression Checkmark & Expected MBs */}
+      {/* Export Modal with Alpha Transparency Support */}
       {showExportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
@@ -665,45 +703,58 @@ export default function StudioPage() {
 
             {!state.isExporting && !downloadUrl && (
               <div className="space-y-4">
-                {/* 1. Format Selection */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-neutral-300 uppercase tracking-wider">
-                    Video Format
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => setState((p) => ({ ...p, exportFormat: 'mp4' }))}
-                      className={`p-2.5 rounded-xl border text-xs font-semibold transition-all flex items-center justify-between ${
-                        state.exportFormat === 'mp4'
-                          ? 'bg-sky-950/60 border-sky-500 text-white shadow-sm'
-                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2">
-                        <FileVideo className="w-4 h-4 text-sky-400" />
-                        <span>MP4 (Universal)</span>
-                      </div>
-                      {state.exportFormat === 'mp4' && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />}
-                    </button>
-
-                    <button
-                      onClick={() => setState((p) => ({ ...p, exportFormat: 'webm' }))}
-                      className={`p-2.5 rounded-xl border text-xs font-semibold transition-all flex items-center justify-between ${
-                        state.exportFormat === 'webm'
-                          ? 'bg-sky-950/60 border-sky-500 text-white shadow-sm'
-                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2">
-                        <FileVideo className="w-4 h-4 text-indigo-400" />
-                        <span>WebM (VP9)</span>
-                      </div>
-                      {state.exportFormat === 'webm' && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />}
-                    </button>
+                {/* Alpha Transparency Banner if no background video */}
+                {isTransparentAlphaActive ? (
+                  <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 text-xs space-y-1">
+                    <div className="flex items-center space-x-1.5 text-emerald-300 font-bold">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Alpha Channel Transparency Active</span>
+                    </div>
+                    <p className="text-[11px] text-emerald-200/80">
+                      The video will export as a <strong>Transparent WebM (VP9 RGBA)</strong> clip ready to overlay directly in Premiere Pro, Final Cut, DaVinci Resolve, or web pages.
+                    </p>
                   </div>
-                </div>
+                ) : (
+                  /* Format Selection if background video exists */
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-neutral-300 uppercase tracking-wider">
+                      Video Format
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => setState((p) => ({ ...p, exportFormat: 'mp4' }))}
+                        className={`p-2.5 rounded-xl border text-xs font-semibold transition-all flex items-center justify-between ${
+                          state.exportFormat === 'mp4'
+                            ? 'bg-sky-950/60 border-sky-500 text-white shadow-sm'
+                            : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-2">
+                          <FileVideo className="w-4 h-4 text-sky-400" />
+                          <span>MP4 (Universal)</span>
+                        </div>
+                        {state.exportFormat === 'mp4' && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />}
+                      </button>
 
-                {/* 2. Compression Checkmark Option */}
+                      <button
+                        onClick={() => setState((p) => ({ ...p, exportFormat: 'webm' }))}
+                        className={`p-2.5 rounded-xl border text-xs font-semibold transition-all flex items-center justify-between ${
+                          state.exportFormat === 'webm'
+                            ? 'bg-sky-950/60 border-sky-500 text-white shadow-sm'
+                            : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-2">
+                          <FileVideo className="w-4 h-4 text-indigo-400" />
+                          <span>WebM (VP9)</span>
+                        </div>
+                        {state.exportFormat === 'webm' && <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Compression Checkmark Option */}
                 <div
                   onClick={() => setState((p) => ({ ...p, compressVideo: !p.compressVideo }))}
                   className="bg-neutral-950 p-3 rounded-xl border border-neutral-800 flex items-start space-x-3 cursor-pointer hover:border-neutral-700 transition-all select-none"
@@ -717,7 +768,7 @@ export default function StudioPage() {
                   </div>
                   <div>
                     <span className="text-xs font-bold text-white block">
-                      Compress Video (Optimized for Social Media)
+                      Compress Video (Optimized for Web & Social)
                     </span>
                     <span className="text-[11px] text-neutral-400 block mt-0.5">
                       {state.compressVideo
@@ -727,15 +778,17 @@ export default function StudioPage() {
                   </div>
                 </div>
 
-                {/* 3. Output Specs & Expected MBs */}
+                {/* Output Specs & Expected MBs */}
                 <div className="bg-neutral-950/90 p-3 rounded-xl border border-neutral-800 text-xs space-y-2 text-neutral-300">
                   <div className="flex justify-between">
                     <span className="text-neutral-400">Resolution:</span>
                     <span className="font-mono text-white">1080 × 1440 (3:4 HD)</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-neutral-400">Speed:</span>
-                    <span className="font-mono text-emerald-400">1.0x Normal Real-Time</span>
+                    <span className="text-neutral-400">Background Layer:</span>
+                    <span className="font-mono text-emerald-400">
+                      {isTransparentAlphaActive ? '100% Alpha Transparent' : 'Composited Background'}
+                    </span>
                   </div>
                   <div className="flex justify-between border-t border-neutral-800/80 pt-1.5">
                     <span className="text-neutral-400 font-semibold">Expected File Size:</span>
@@ -748,7 +801,7 @@ export default function StudioPage() {
                   className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-sky-600/30 flex items-center justify-center space-x-2 transition-all"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Start Video Render</span>
+                  <span>{isTransparentAlphaActive ? 'Start Transparent Render' : 'Start Video Render'}</span>
                 </button>
               </div>
             )}
@@ -757,7 +810,9 @@ export default function StudioPage() {
               <div className="py-6 text-center space-y-4">
                 <Loader2 className="w-8 h-8 mx-auto text-sky-400 animate-spin" />
                 <div>
-                  <h4 className="font-bold text-sm text-white">Rendering at 1.0x Normal Speed...</h4>
+                  <h4 className="font-bold text-sm text-white">
+                    {exportProgress.hasAlpha ? 'Rendering Transparent Alpha Video...' : 'Rendering at 1.0x Normal Speed...'}
+                  </h4>
                   <p className="text-xs text-neutral-400 mt-1">
                     Recording {exportProgress.elapsedSeconds || 0}s / {exportProgress.totalSeconds || state.duration}s
                   </p>
@@ -785,6 +840,11 @@ export default function StudioPage() {
                       </span>
                     </div>
                   )}
+                  {exportedHasAlpha && (
+                    <p className="text-[11px] text-emerald-400 mt-1.5 font-medium">
+                      ✨ Alpha transparency preserved for video editors & web overlays.
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 pt-2">
@@ -793,7 +853,7 @@ export default function StudioPage() {
                     className="py-2.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center justify-center space-x-1.5 shadow-md shadow-sky-600/20"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Download {state.exportFormat.toUpperCase()}</span>
+                    <span>Download {isTransparentAlphaActive ? 'Transparent Video' : state.exportFormat.toUpperCase()}</span>
                   </button>
                   <button
                     onClick={() => {

@@ -9,6 +9,7 @@ export interface ExportProgress {
   blobSizeMb?: string;
   elapsedSeconds?: number;
   totalSeconds?: number;
+  hasAlpha?: boolean;
 }
 
 export class StudioVideoExporter {
@@ -24,7 +25,6 @@ export class StudioVideoExporter {
 
   public static getExpectedSizeMb(durationSeconds: number, compress: boolean): string {
     const dur = Math.max(2, durationSeconds || 10);
-    // Bitrates: compressed = 4.0 Mbps, uncompressed = 14.0 Mbps
     const bitrateBps = compress ? 4000000 : 14000000;
     const bytes = (bitrateBps * dur) / 8;
     const mb = bytes / (1024 * 1024);
@@ -36,7 +36,7 @@ export class StudioVideoExporter {
     bgVideo: HTMLVideoElement | null,
     tabVideo: HTMLVideoElement | null,
     onProgress: (info: ExportProgress) => void
-  ): Promise<{ blob: Blob; blobUrl: string; sizeMb: string; format: ExportFormat }> {
+  ): Promise<{ blob: Blob; blobUrl: string; sizeMb: string; format: ExportFormat; hasAlpha: boolean }> {
     this.isCancelled = false;
 
     return new Promise(async (resolve, reject) => {
@@ -49,7 +49,9 @@ export class StudioVideoExporter {
         exportCanvas.width = width;
         exportCanvas.height = height;
 
-        const ctx = exportCanvas.getContext('2d', { alpha: false });
+        // Alpha Context for Transparent Background Support
+        const isAlphaTransparent = !state.bgVideoUrl;
+        const ctx = exportCanvas.getContext('2d', { alpha: true });
         if (!ctx) throw new Error('Canvas context could not be created');
 
         // Determine total duration
@@ -62,20 +64,17 @@ export class StudioVideoExporter {
         totalDuration = Math.max(2, Math.min(300, totalDuration));
 
         // Codec & Format selection
-        const requestedFormat = state.exportFormat || 'mp4';
+        // Note: For Alpha transparency, WebM VP9 natively preserves the alpha channel
+        let requestedFormat = state.exportFormat || (isAlphaTransparent ? 'webm' : 'mp4');
+        if (isAlphaTransparent) {
+          requestedFormat = 'webm';
+        }
+
         const isCompress = state.compressVideo !== false;
         const targetBitrate = isCompress ? 4200000 : 16000000;
 
         let mimeType = '';
-        if (requestedFormat === 'mp4') {
-          if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
-            mimeType = 'video/mp4;codecs=avc1';
-          } else if (MediaRecorder.isTypeSupported('video/mp4')) {
-            mimeType = 'video/mp4';
-          }
-        }
-
-        if (!mimeType) {
+        if (requestedFormat === 'webm' || isAlphaTransparent) {
           if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
             mimeType = 'video/webm;codecs=vp9';
           } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
@@ -83,9 +82,16 @@ export class StudioVideoExporter {
           } else {
             mimeType = 'video/webm';
           }
+        } else {
+          if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
+            mimeType = 'video/mp4;codecs=avc1';
+          } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+            mimeType = 'video/mp4';
+          } else {
+            mimeType = 'video/webm;codecs=vp9';
+          }
         }
 
-        // Capture stream at 60 FPS
         const canvasStream = exportCanvas.captureStream(60);
 
         const options: MediaRecorderOptions = {
@@ -100,15 +106,14 @@ export class StudioVideoExporter {
           if (e.data && e.data.size > 0) recordedChunks.push(e.data);
         };
 
-        // Reset and prepare video elements for 1:1 real-time playback
-        if (bgVideo) {
+        if (bgVideo && state.bgVideoUrl) {
           bgVideo.currentTime = 0;
           bgVideo.playbackRate = 1.0;
           bgVideo.muted = true;
           bgVideo.loop = true;
           await bgVideo.play().catch(() => {});
         }
-        if (tabVideo) {
+        if (tabVideo && state.tabVideoUrl) {
           tabVideo.currentTime = 0;
           tabVideo.playbackRate = 1.0;
           tabVideo.muted = true;
@@ -124,6 +129,7 @@ export class StudioVideoExporter {
           status: 'recording',
           elapsedSeconds: 0,
           totalSeconds: totalDuration,
+          hasAlpha: isAlphaTransparent,
         });
 
         // Exact 1:1 Normal Speed Real-Time Recording Loop
@@ -139,19 +145,19 @@ export class StudioVideoExporter {
           const elapsedSec = (performance.now() - startTime) / 1000;
 
           if (elapsedSec >= totalDuration) {
-            // Reached duration limit
             onProgress({
               progress: 96,
               status: 'encoding',
               elapsedSeconds: totalDuration,
               totalSeconds: totalDuration,
+              hasAlpha: isAlphaTransparent,
             });
 
             if (bgVideo) bgVideo.pause();
             if (tabVideo) tabVideo.pause();
 
             mediaRecorder.onstop = () => {
-              const outputMime = mimeType.includes('mp4') ? 'video/mp4' : 'video/webm';
+              const outputMime = isAlphaTransparent ? 'video/webm' : (mimeType.includes('mp4') ? 'video/mp4' : 'video/webm');
               const blob = new Blob(recordedChunks, { type: outputMime });
               const blobUrl = URL.createObjectURL(blob);
               const sizeMb = (blob.size / (1024 * 1024)).toFixed(2) + ' MB';
@@ -163,13 +169,15 @@ export class StudioVideoExporter {
                 blobSizeMb: sizeMb,
                 elapsedSeconds: totalDuration,
                 totalSeconds: totalDuration,
+                hasAlpha: isAlphaTransparent,
               });
 
               resolve({
                 blob,
                 blobUrl,
                 sizeMb,
-                format: outputMime.includes('mp4') ? 'mp4' : 'webm',
+                format: isAlphaTransparent ? 'webm' : (outputMime.includes('mp4') ? 'mp4' : 'webm'),
+                hasAlpha: isAlphaTransparent,
               });
             };
 
@@ -177,7 +185,6 @@ export class StudioVideoExporter {
             return;
           }
 
-          // Render exact current timestamp
           renderStudioFrame({
             ctx,
             state,
@@ -194,6 +201,7 @@ export class StudioVideoExporter {
             status: 'recording',
             elapsedSeconds: Math.round(elapsedSec * 10) / 10,
             totalSeconds: totalDuration,
+            hasAlpha: isAlphaTransparent,
           });
 
           this.animId = requestAnimationFrame(recordFrame);
@@ -215,7 +223,7 @@ export class StudioVideoExporter {
     const canvas = document.createElement('canvas');
     canvas.width = 1080;
     canvas.height = 1440;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return '';
 
     renderStudioFrame({
