@@ -15,12 +15,20 @@ export interface ExportProgress {
 export class StudioVideoExporter {
   private isCancelled = false;
   private animId: number | null = null;
-  private timerId: any = null;
+  private offscreenTabVideo: HTMLVideoElement | null = null;
+  private offscreenBgVideo: HTMLVideoElement | null = null;
 
   public cancel() {
     this.isCancelled = true;
     if (this.animId) cancelAnimationFrame(this.animId);
-    if (this.timerId) clearTimeout(this.timerId);
+    if (this.offscreenTabVideo) {
+      this.offscreenTabVideo.pause();
+      this.offscreenTabVideo.src = '';
+    }
+    if (this.offscreenBgVideo) {
+      this.offscreenBgVideo.pause();
+      this.offscreenBgVideo.src = '';
+    }
   }
 
   public static getExpectedSizeMb(durationSeconds: number, compress: boolean): string {
@@ -33,8 +41,8 @@ export class StudioVideoExporter {
 
   public async exportVideo(
     state: StudioState,
-    bgVideo: HTMLVideoElement | null,
-    tabVideo: HTMLVideoElement | null,
+    _uiBgVideo: HTMLVideoElement | null,
+    _uiTabVideo: HTMLVideoElement | null,
     onProgress: (info: ExportProgress) => void
   ): Promise<{ blob: Blob; blobUrl: string; sizeMb: string; format: ExportFormat; hasAlpha: boolean }> {
     this.isCancelled = false;
@@ -49,32 +57,75 @@ export class StudioVideoExporter {
         exportCanvas.width = width;
         exportCanvas.height = height;
 
-        // Alpha Context for Transparent Background Support
         const isAlphaTransparent = !state.bgVideoUrl;
         const ctx = exportCanvas.getContext('2d', { alpha: true });
-        if (!ctx) throw new Error('Canvas context could not be created');
+        if (!ctx) throw new Error('Canvas 2D context creation failed');
+
+        // 1. Create Dedicated Isolated Offscreen Videos (NEVER affected by UI pauses or React re-renders)
+        const tabVid = document.createElement('video');
+        tabVid.crossOrigin = 'anonymous';
+        tabVid.playsInline = true;
+        tabVid.muted = true;
+        tabVid.loop = true;
+        tabVid.preload = 'auto';
+        this.offscreenTabVideo = tabVid;
+
+        let bgVid: HTMLVideoElement | null = null;
+        if (state.bgVideoUrl) {
+          bgVid = document.createElement('video');
+          bgVid.crossOrigin = 'anonymous';
+          bgVid.playsInline = true;
+          bgVid.muted = true;
+          bgVid.loop = true;
+          bgVid.preload = 'auto';
+          this.offscreenBgVideo = bgVid;
+        }
+
+        // Load isolated video sources
+        const loadPromises: Promise<void>[] = [];
+
+        if (state.tabVideoUrl) {
+          tabVid.src = state.tabVideoUrl;
+          loadPromises.push(
+            new Promise((res) => {
+              if (tabVid.readyState >= 2) res();
+              else {
+                tabVid.onloadeddata = () => res();
+                tabVid.onerror = () => res();
+              }
+            })
+          );
+          tabVid.load();
+        }
+
+        if (bgVid && state.bgVideoUrl) {
+          bgVid.src = state.bgVideoUrl;
+          loadPromises.push(
+            new Promise((res) => {
+              if (bgVid!.readyState >= 2) res();
+              else {
+                bgVid!.onloadeddata = () => res();
+                bgVid!.onerror = () => res();
+              }
+            })
+          );
+          bgVid.load();
+        }
+
+        await Promise.all(loadPromises);
 
         // Determine total duration
         let totalDuration = state.duration || 10;
-        if (tabVideo && tabVideo.duration && !isNaN(tabVideo.duration) && tabVideo.duration > 0) {
-          totalDuration = tabVideo.duration;
-        } else if (bgVideo && bgVideo.duration && !isNaN(bgVideo.duration) && bgVideo.duration > 0) {
-          totalDuration = bgVideo.duration;
+        if (tabVid.duration && !isNaN(tabVid.duration) && tabVid.duration > 0) {
+          totalDuration = tabVid.duration;
+        } else if (bgVid && bgVid.duration && !isNaN(bgVid.duration) && bgVid.duration > 0) {
+          totalDuration = bgVid.duration;
         }
         totalDuration = Math.max(2, Math.min(300, totalDuration));
 
-        // Codec & Format selection
-        // Note: For Alpha transparency, WebM VP9 natively preserves the alpha channel
-        let requestedFormat = state.exportFormat || (isAlphaTransparent ? 'webm' : 'mp4');
-        if (isAlphaTransparent) {
-          requestedFormat = 'webm';
-        }
-
-        const isCompress = state.compressVideo !== false;
-        const targetBitrate = isCompress ? 4200000 : 16000000;
-
+        // Codec selection (VP9 preserves alpha channel in WebM)
         let mimeType = '';
-        if (requestedFormat === 'webm' || isAlphaTransparent) {
+        if (isAlphaTransparent || state.exportFormat === 'webm') {
           if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
             mimeType = 'video/webm;codecs=vp9';
           } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
@@ -92,36 +143,32 @@ export class StudioVideoExporter {
           }
         }
 
-        const canvasStream = exportCanvas.captureStream(60);
+        const isCompress = state.compressVideo !== false;
+        const targetBitrate = isCompress ? 4500000 : 16000000;
 
-        const options: MediaRecorderOptions = {
+        const canvasStream = exportCanvas.captureStream(60);
+        const mediaRecorder = new MediaRecorder(canvasStream, {
           mimeType: mimeType || undefined,
           videoBitsPerSecond: targetBitrate,
-        };
+        });
 
-        const mediaRecorder = new MediaRecorder(canvasStream, options);
         const recordedChunks: Blob[] = [];
-
         mediaRecorder.ondataavailable = (e) => {
           if (e.data && e.data.size > 0) recordedChunks.push(e.data);
         };
 
-        if (bgVideo && state.bgVideoUrl) {
-          bgVideo.currentTime = 0;
-          bgVideo.playbackRate = 1.0;
-          bgVideo.muted = true;
-          bgVideo.loop = true;
-          await bgVideo.play().catch(() => {});
-        }
-        if (tabVideo && state.tabVideoUrl) {
-          tabVideo.currentTime = 0;
-          tabVideo.playbackRate = 1.0;
-          tabVideo.muted = true;
-          tabVideo.loop = true;
-          await tabVideo.play().catch(() => {});
+        // Reset and start playback on dedicated offscreen videos
+        tabVid.currentTime = 0;
+        tabVid.playbackRate = 1.0;
+        await tabVid.play().catch(() => {});
+
+        if (bgVid) {
+          bgVid.currentTime = 0;
+          bgVid.playbackRate = 1.0;
+          await bgVid.play().catch(() => {});
         }
 
-        const startTime = performance.now();
+        const recordStartTime = performance.now();
         mediaRecorder.start(100);
 
         onProgress({
@@ -132,17 +179,25 @@ export class StudioVideoExporter {
           hasAlpha: isAlphaTransparent,
         });
 
-        // Exact 1:1 Normal Speed Real-Time Recording Loop
+        // 1:1 Seamless Recording Loop
         const recordFrame = () => {
           if (this.isCancelled) {
             mediaRecorder.stop();
-            if (bgVideo) bgVideo.pause();
-            if (tabVideo) tabVideo.pause();
+            tabVid.pause();
+            if (bgVid) bgVid.pause();
             reject(new Error('Export cancelled'));
             return;
           }
 
-          const elapsedSec = (performance.now() - startTime) / 1000;
+          // Ensure offscreen videos stay playing continuously
+          if (tabVid.paused && !tabVid.error && tabVid.src) {
+            tabVid.play().catch(() => {});
+          }
+          if (bgVid && bgVid.paused && !bgVid.error && bgVid.src) {
+            bgVid.play().catch(() => {});
+          }
+
+          const elapsedSec = (performance.now() - recordStartTime) / 1000;
 
           if (elapsedSec >= totalDuration) {
             onProgress({
@@ -153,8 +208,8 @@ export class StudioVideoExporter {
               hasAlpha: isAlphaTransparent,
             });
 
-            if (bgVideo) bgVideo.pause();
-            if (tabVideo) tabVideo.pause();
+            tabVid.pause();
+            if (bgVid) bgVid.pause();
 
             mediaRecorder.onstop = () => {
               const outputMime = isAlphaTransparent ? 'video/webm' : (mimeType.includes('mp4') ? 'video/mp4' : 'video/webm');
@@ -185,11 +240,12 @@ export class StudioVideoExporter {
             return;
           }
 
+          // Render exact frame timestamp using isolated videos
           renderStudioFrame({
             ctx,
             state,
-            bgVideo,
-            tabVideo,
+            bgVideo: bgVid,
+            tabVideo: tabVid,
             time: elapsedSec,
             width,
             height,

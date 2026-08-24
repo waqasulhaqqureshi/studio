@@ -19,6 +19,7 @@ export function renderStudioFrame({
   width,
   height,
 }: RenderOptions) {
+  // Clear full canvas preserving 100% alpha transparency
   ctx.clearRect(0, 0, width, height);
 
   const baseScale = width / 1080;
@@ -78,7 +79,8 @@ export function renderStudioFrame({
   }
 
   // -------------------------------------------------------------
-  // 3. LAYER 1: DOWN (BACKGROUND VIDEO)
+  // 3. LAYER 1: DOWN (BACKGROUND VIDEO - ONLY DRAWN IF LOADED)
+  // When no background video is loaded, this layer is 100% TRANSPARENT!
   // -------------------------------------------------------------
   if (hasBgVideo && bgVideo) {
     ctx.save();
@@ -113,9 +115,8 @@ export function renderStudioFrame({
   const headerH = Math.round(44 * baseScale);
   const targetScale = state.tabScale || 0.82;
   let tabW = Math.round(screenW * targetScale);
-  let contentH = Math.round((tabW * 9) / 16); // 16:9 Standard default
+  let contentH = Math.round((tabW * 9) / 16);
 
-  // Calculate content height based on selected aspect ratio
   if (state.tabAspectRatio === '16:9') {
     contentH = Math.round((tabW * 9) / 16);
   } else if (state.tabAspectRatio === '4:3') {
@@ -123,7 +124,6 @@ export function renderStudioFrame({
   } else if (state.tabAspectRatio === '1:1') {
     contentH = Math.round(tabW);
   } else if (state.tabAspectRatio === '9:16') {
-    // Vertical phone format
     const maxTabH = screenH * 0.88;
     const rawH = (tabW * 16) / 9 + headerH;
     if (rawH > maxTabH) {
@@ -141,7 +141,6 @@ export function renderStudioFrame({
 
   let tabH = headerH + contentH;
 
-  // Keep within bounds
   if (tabH > screenH * 0.92) {
     const scaleFactor = (screenH * 0.92) / tabH;
     tabW = Math.round(tabW * scaleFactor);
@@ -161,12 +160,12 @@ export function renderStudioFrame({
 
   // 3D Dynamic Drop Shadow
   ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
-  ctx.shadowBlur = Math.max(16, (48 + animInfo.shadowElevation) * baseScale);
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
+  ctx.shadowBlur = Math.max(16, (44 + animInfo.shadowElevation) * baseScale);
   ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = Math.max(10, (24 + animInfo.shadowOffsetY) * baseScale);
+  ctx.shadowOffsetY = Math.max(10, (22 + animInfo.shadowOffsetY) * baseScale);
   drawPerfectRoundedRect(ctx, tabX, tabY, tabW, tabH, radius);
-  ctx.fillStyle = '#000000';
+  ctx.fillStyle = '#0f172a';
   ctx.fill();
   ctx.restore();
 
