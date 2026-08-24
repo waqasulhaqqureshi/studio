@@ -34,7 +34,7 @@ const INITIAL_STATE: StudioState = {
   tabUrl: 'https://studio.app/preview',
   tabAspectRatio: '16:9',
   tabScale: 0.82,
-  animationType: '3d-flip-h',
+  animationType: 'none',
   flipInterval: 3.0,
   animationSpeed: 1.0,
   showTabletBezel: false,

@@ -19,7 +19,7 @@ export function renderStudioFrame({
   width,
   height,
 }: RenderOptions) {
-  // Clear full canvas preserving 100% alpha transparency
+  // Clear full canvas
   ctx.clearRect(0, 0, width, height);
 
   const baseScale = width / 1080;
@@ -80,7 +80,6 @@ export function renderStudioFrame({
 
   // -------------------------------------------------------------
   // 3. LAYER 1: DOWN (BACKGROUND VIDEO - ONLY DRAWN IF LOADED)
-  // When no background video is loaded, this layer is 100% TRANSPARENT!
   // -------------------------------------------------------------
   if (hasBgVideo && bgVideo) {
     ctx.save();
@@ -105,7 +104,7 @@ export function renderStudioFrame({
 
     ctx.restore();
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
     ctx.fillRect(screenX, screenY, screenW, screenH);
   }
 
@@ -115,7 +114,7 @@ export function renderStudioFrame({
   const headerH = Math.round(44 * baseScale);
   const targetScale = state.tabScale || 0.82;
   let tabW = Math.round(screenW * targetScale);
-  let contentH = Math.round((tabW * 9) / 16);
+  let contentH = Math.round((tabW * 9) / 16); // 16:9 default
 
   if (state.tabAspectRatio === '16:9') {
     contentH = Math.round((tabW * 9) / 16);
@@ -160,12 +159,12 @@ export function renderStudioFrame({
 
   // 3D Dynamic Drop Shadow
   ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
-  ctx.shadowBlur = Math.max(16, (44 + animInfo.shadowElevation) * baseScale);
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+  ctx.shadowBlur = Math.max(16, (48 + animInfo.shadowElevation) * baseScale);
   ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = Math.max(10, (22 + animInfo.shadowOffsetY) * baseScale);
+  ctx.shadowOffsetY = Math.max(10, (24 + animInfo.shadowOffsetY) * baseScale);
   drawPerfectRoundedRect(ctx, tabX, tabY, tabW, tabH, radius);
-  ctx.fillStyle = '#0f172a';
+  ctx.fillStyle = '#111318';
   ctx.fill();
   ctx.restore();
 
@@ -174,12 +173,16 @@ export function renderStudioFrame({
   drawPerfectRoundedRect(ctx, tabX, tabY, tabW, tabH, radius);
   ctx.clip();
 
+  // Tab Base Fill
+  ctx.fillStyle = '#111318';
+  ctx.fillRect(tabX, tabY, tabW, tabH);
+
   // Render specific macOS header style
   renderMacOsHeader(ctx, state.macFrameStyle, state.tabTitle, state.tabUrl, tabX, tabY, tabW, headerH, radius, baseScale);
 
   // Video Content Area
   const contentY = tabY + headerH;
-  ctx.fillStyle = '#000000';
+  ctx.fillStyle = '#090a0f';
   ctx.fillRect(tabX, contentY, tabW, contentH);
 
   let tabDrawn = false;
@@ -203,29 +206,60 @@ export function renderStudioFrame({
     }
   }
 
-  // Only draw placeholder text if no video source is selected
-  if (!tabDrawn && !state.tabVideoUrl) {
-    ctx.fillStyle = '#0f172a';
+  // Draw clean, visible placeholder inside the 16:9 tab if video is not yet drawn
+  if (!tabDrawn) {
+    ctx.fillStyle = '#13151b';
     ctx.fillRect(tabX, contentY, tabW, contentH);
 
-    ctx.fillStyle = '#f8fafc';
-    ctx.font = `bold ${Math.floor(19 * baseScale)}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText('⬆️ Upload Up Video', tabX + tabW / 2, contentY + contentH / 2 - 8 * baseScale);
+    // Subtle center card outline inside placeholder
+    const boxW = Math.min(tabW * 0.7, 340 * baseScale);
+    const boxH = Math.min(contentH * 0.65, 160 * baseScale);
+    const boxX = tabX + (tabW - boxW) / 2;
+    const boxY = contentY + (contentH - boxH) / 2;
 
-    ctx.fillStyle = '#64748b';
-    ctx.font = `${Math.floor(12 * baseScale)}px sans-serif`;
-    ctx.fillText('16:9 Content video inside macOS tab', tabX + tabW / 2, contentY + contentH / 2 + 18 * baseScale);
+    drawPerfectRoundedRect(ctx, boxX, boxY, boxW, boxH, 12 * baseScale);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 1.5 * baseScale;
+    ctx.stroke();
+
+    // Icon Circle
+    ctx.fillStyle = '#0284c7';
+    ctx.beginPath();
+    ctx.arc(tabX + tabW / 2, boxY + boxH * 0.38, 18 * baseScale, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Play Triangle
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    const triX = tabX + tabW / 2 - 4 * baseScale;
+    const triY = boxY + boxH * 0.38;
+    ctx.moveTo(triX, triY - 7 * baseScale);
+    ctx.lineTo(triX + 11 * baseScale, triY);
+    ctx.lineTo(triX, triY + 7 * baseScale);
+    ctx.closePath();
+    ctx.fill();
+
+    // Text Label
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = `bold ${Math.floor(15 * baseScale)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Upload 16:9 Up Video', tabX + tabW / 2, boxY + boxH * 0.72);
+
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = `${Math.floor(11 * baseScale)}px sans-serif`;
+    ctx.fillText('Click or drag video into sidebar', tabX + tabW / 2, boxY + boxH * 0.88);
   }
 
-  ctx.restore();
+  ctx.restore(); // Clip Tab Restore
 
-  // Window Outer Rim Highlight
+  // Window Outer Rim Highlight (Crisp high-definition macOS frame outline)
   ctx.save();
   drawPerfectRoundedRect(ctx, tabX, tabY, tabW, tabH, radius);
   ctx.strokeStyle = state.macFrameStyle.includes('light')
-    ? 'rgba(0, 0, 0, 0.15)'
-    : 'rgba(255, 255, 255, 0.16)';
+    ? 'rgba(0, 0, 0, 0.25)'
+    : 'rgba(255, 255, 255, 0.22)';
   ctx.lineWidth = 1.5 * baseScale;
   ctx.stroke();
   ctx.restore();
@@ -252,6 +286,7 @@ function applyTabAnimation(
 
   switch (animType) {
     case '3d-flip-h': {
+      // 3D Horizontal Flip 360°
       const flipDuration = 0.9;
       const cycle = adjustedTime % interval;
       if (cycle < flipDuration) {
@@ -383,21 +418,23 @@ function renderMacOsHeader(
   if (isLight) {
     ctx.fillStyle = '#e8ecf2';
   } else if (isGlass) {
-    ctx.fillStyle = 'rgba(24, 28, 38, 0.85)';
+    ctx.fillStyle = 'rgba(24, 28, 38, 0.92)';
   } else if (style === 'chrome-macos') {
-    ctx.fillStyle = '#1f2024';
+    ctx.fillStyle = '#22242a';
   } else {
-    ctx.fillStyle = '#1e1f24';
+    // safari-sonoma-dark
+    ctx.fillStyle = '#22242a';
   }
   ctx.fillRect(x, y, w, h);
 
-  ctx.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.08)';
+  ctx.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255, 255, 255, 0.1)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(x, y + h);
   ctx.lineTo(x + w, y + h);
   ctx.stroke();
 
+  // Traffic lights
   const dotR = 5.5 * scale;
   const startX = x + 18 * scale;
   const centerY = y + h / 2;
@@ -431,9 +468,9 @@ function renderMacOsHeader(
     const pillY = y + (h - pillH) / 2;
 
     drawPerfectRoundedRect(ctx, pillX, pillY, pillW, pillH, 6 * scale);
-    ctx.fillStyle = isLight ? '#ffffff' : '#121316';
+    ctx.fillStyle = isLight ? '#ffffff' : '#14151a';
     ctx.fill();
-    ctx.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.1)';
+    ctx.strokeStyle = isLight ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255, 255, 255, 0.14)';
     ctx.lineWidth = 1;
     ctx.stroke();
 
