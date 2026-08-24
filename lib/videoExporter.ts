@@ -1,10 +1,8 @@
-import { StudioProjectState } from './types';
+import { StudioState } from './types';
 import { renderStudioFrame } from './canvasRenderer';
 
 export interface ExportProgress {
-  progress: number; // 0 to 100
-  currentTime: number;
-  totalDuration: number;
+  progress: number;
   status: 'initializing' | 'rendering' | 'encoding' | 'completed' | 'error';
   errorMessage?: string;
   blobUrl?: string;
@@ -19,7 +17,7 @@ export class StudioVideoExporter {
   }
 
   public async exportVideo(
-    state: StudioProjectState,
+    state: StudioState,
     bgVideo: HTMLVideoElement | null,
     tabVideo: HTMLVideoElement | null,
     onProgress: (info: ExportProgress) => void
@@ -28,26 +26,18 @@ export class StudioVideoExporter {
 
     return new Promise(async (resolve, reject) => {
       try {
-        onProgress({
-          progress: 2,
-          currentTime: 0,
-          totalDuration: state.duration,
-          status: 'initializing',
-        });
+        onProgress({ progress: 5, status: 'initializing' });
 
-        // 1. Create offline render canvas
+        const width = 1080;
+        const height = 1440;
         const exportCanvas = document.createElement('canvas');
-        const exportWidth = state.canvasWidth || 1080;
-        const exportHeight = state.canvasHeight || 1440;
-        exportCanvas.width = exportWidth;
-        exportCanvas.height = exportHeight;
+        exportCanvas.width = width;
+        exportCanvas.height = height;
 
         const ctx = exportCanvas.getContext('2d', { alpha: false });
-        if (!ctx) {
-          throw new Error('Failed to create canvas rendering context');
-        }
+        if (!ctx) throw new Error('Canvas 2D context creation failed');
 
-        // 2. Prepare audio mixer stream
+        // Prepare Audio Context & Mixer
         let audioStream: MediaStream | null = null;
         let audioContext: AudioContext | null = null;
 
@@ -63,7 +53,7 @@ export class StudioVideoExporter {
             try {
               const bgSrc = audioContext.createMediaElementSource(bgVideo);
               const bgGain = audioContext.createGain();
-              bgGain.gain.value = state.background.isMuted ? 0 : state.background.volume;
+              bgGain.gain.value = state.isBgMuted ? 0 : state.bgVolume;
               bgSrc.connect(bgGain);
               bgGain.connect(masterGain);
             } catch {}
@@ -73,194 +63,132 @@ export class StudioVideoExporter {
             try {
               const tabSrc = audioContext.createMediaElementSource(tabVideo);
               const tabGain = audioContext.createGain();
-              tabGain.gain.value = state.tabMockup.isMuted ? 0 : state.tabMockup.volume;
+              tabGain.gain.value = state.isTabMuted ? 0 : state.tabVolume;
               tabSrc.connect(tabGain);
               tabGain.connect(masterGain);
             } catch {}
           }
 
           audioStream = dest.stream;
-        } catch (audioErr) {
-          console.warn('Audio export fallback:', audioErr);
+        } catch (e) {
+          console.warn('Audio mixer skipped:', e);
         }
 
-        // 3. Set up MediaRecorder on canvas stream
         const canvasStream = exportCanvas.captureStream(60);
         const combinedStream = new MediaStream();
-
-        canvasStream.getVideoTracks().forEach((track) => combinedStream.addTrack(track));
+        canvasStream.getVideoTracks().forEach((t) => combinedStream.addTrack(t));
         if (audioStream) {
-          audioStream.getAudioTracks().forEach((track) => combinedStream.addTrack(track));
+          audioStream.getAudioTracks().forEach((t) => combinedStream.addTrack(t));
         }
 
-        // Determine best supported MIME type
         const mimeTypes = [
           'video/webm;codecs=vp9,opus',
           'video/webm;codecs=vp8,opus',
           'video/webm',
-          'video/mp4;codecs=avc1',
           'video/mp4',
         ];
-        let chosenMimeType = '';
-        for (const mime of mimeTypes) {
-          if (MediaRecorder.isTypeSupported(mime)) {
-            chosenMimeType = mime;
+        let chosenMime = '';
+        for (const m of mimeTypes) {
+          if (MediaRecorder.isTypeSupported(m)) {
+            chosenMime = m;
             break;
           }
         }
 
-        const options: MediaRecorderOptions = {
-          mimeType: chosenMimeType || undefined,
-          videoBitsPerSecond: 8000000, // 8 Mbps for crisp HD 1080x1440 quality
-        };
-
-        const mediaRecorder = new MediaRecorder(combinedStream, options);
-        const recordedChunks: Blob[] = [];
-
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) {
-            recordedChunks.push(event.data);
-          }
-        };
-
-        const totalDuration = Math.max(1, state.duration);
-        const targetFps = 30;
-        const totalFrames = Math.ceil(totalDuration * targetFps);
-        const timeStep = 1 / targetFps;
-
-        // Reset video playheads
-        if (bgVideo) {
-          bgVideo.currentTime = 0;
-          bgVideo.playbackRate = state.background.playbackSpeed || 1.0;
-        }
-        if (tabVideo) {
-          tabVideo.currentTime = 0;
-          tabVideo.playbackRate = state.tabMockup.playbackSpeed || 1.0;
-        }
-
-        mediaRecorder.start(200);
-
-        onProgress({
-          progress: 5,
-          currentTime: 0,
-          totalDuration,
-          status: 'rendering',
+        const mediaRecorder = new MediaRecorder(combinedStream, {
+          mimeType: chosenMime || undefined,
+          videoBitsPerSecond: 8000000,
         });
 
-        // 4. Render loop
-        let currentFrame = 0;
+        const recordedChunks: Blob[] = [];
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+        };
 
-        const renderNextFrame = async () => {
+        const totalDuration = Math.max(2, state.duration || 10);
+        const fps = 30;
+        const totalFrames = Math.ceil(totalDuration * fps);
+        const dt = 1 / fps;
+
+        if (bgVideo) bgVideo.currentTime = 0;
+        if (tabVideo) tabVideo.currentTime = 0;
+
+        mediaRecorder.start(200);
+        onProgress({ progress: 10, status: 'rendering' });
+
+        let frame = 0;
+        const renderLoop = async () => {
           if (this.isCancelled) {
             mediaRecorder.stop();
             if (audioContext) audioContext.close().catch(() => {});
-            reject(new Error('Export cancelled by user'));
+            reject(new Error('Export cancelled'));
             return;
           }
 
-          const currentTime = currentFrame * timeStep;
+          const t = frame * dt;
 
-          if (currentFrame >= totalFrames || currentTime >= totalDuration) {
-            // Finished all frames
-            onProgress({
-              progress: 95,
-              currentTime: totalDuration,
-              totalDuration,
-              status: 'encoding',
-            });
-
+          if (frame >= totalFrames || t >= totalDuration) {
+            onProgress({ progress: 95, status: 'encoding' });
             mediaRecorder.onstop = () => {
-              const blob = new Blob(recordedChunks, {
-                type: chosenMimeType || 'video/webm',
-              });
+              const blob = new Blob(recordedChunks, { type: chosenMime || 'video/webm' });
               const blobUrl = URL.createObjectURL(blob);
-
               if (audioContext) audioContext.close().catch(() => {});
 
               onProgress({
                 progress: 100,
-                currentTime: totalDuration,
-                totalDuration,
                 status: 'completed',
                 blobUrl,
                 blobSize: blob.size,
               });
-
               resolve({ blob, blobUrl });
             };
-
             mediaRecorder.stop();
             return;
           }
 
-          // Seek videos to currentTime
-          const seekPromises: Promise<void>[] = [];
-
+          const seeks: Promise<void>[] = [];
           if (bgVideo && bgVideo.duration) {
-            const bgTime = state.background.loop
-              ? currentTime % bgVideo.duration
-              : Math.min(currentTime, bgVideo.duration);
-            seekPromises.push(seekVideo(bgVideo, bgTime));
+            seeks.push(seekVideo(bgVideo, t % bgVideo.duration));
           }
-
           if (tabVideo && tabVideo.duration) {
-            const tabTime = Math.min(currentTime, tabVideo.duration);
-            seekPromises.push(seekVideo(tabVideo, tabTime));
+            seeks.push(seekVideo(tabVideo, Math.min(t, tabVideo.duration)));
           }
 
-          await Promise.all(seekPromises);
+          await Promise.all(seeks);
 
-          // Draw composed frame to canvas
           renderStudioFrame({
             ctx,
             state,
             bgVideo,
             tabVideo,
-            time: currentTime,
-            width: exportWidth,
-            height: exportHeight,
+            time: t,
+            width,
+            height,
           });
 
-          currentFrame++;
-          const progressPercent = Math.min(94, Math.round((currentFrame / totalFrames) * 90) + 5);
+          frame++;
+          const percent = Math.min(94, Math.round((frame / totalFrames) * 85) + 10);
+          onProgress({ progress: percent, status: 'rendering' });
 
-          onProgress({
-            progress: progressPercent,
-            currentTime,
-            totalDuration,
-            status: 'rendering',
-          });
-
-          // Schedule next frame with requestAnimationFrame or setTimeout
-          requestAnimationFrame(renderNextFrame);
+          requestAnimationFrame(renderLoop);
         };
 
-        // Start frame pipeline
-        renderNextFrame();
+        renderLoop();
       } catch (err: any) {
-        onProgress({
-          progress: 0,
-          currentTime: 0,
-          totalDuration: state.duration,
-          status: 'error',
-          errorMessage: err.message || 'Export error occurred',
-        });
+        onProgress({ progress: 0, status: 'error', errorMessage: err.message });
         reject(err);
       }
     });
   }
 
   public captureStillFrame(
-    state: StudioProjectState,
+    state: StudioState,
     bgVideo: HTMLVideoElement | null,
     tabVideo: HTMLVideoElement | null
   ): string {
     const canvas = document.createElement('canvas');
-    const width = state.canvasWidth || 1080;
-    const height = state.canvasHeight || 1440;
-    canvas.width = width;
-    canvas.height = height;
-
+    canvas.width = 1080;
+    canvas.height = 1440;
     const ctx = canvas.getContext('2d');
     if (!ctx) return '';
 
@@ -270,8 +198,8 @@ export class StudioVideoExporter {
       bgVideo,
       tabVideo,
       time: state.currentTime,
-      width,
-      height,
+      width: 1080,
+      height: 1440,
     });
 
     return canvas.toDataURL('image/png', 1.0);
@@ -284,18 +212,14 @@ function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
       resolve();
       return;
     }
-
-    const onSeeked = () => {
-      video.removeEventListener('seeked', onSeeked);
+    const onSeek = () => {
+      video.removeEventListener('seeked', onSeek);
       resolve();
     };
-
-    video.addEventListener('seeked', onSeeked, { once: true });
+    video.addEventListener('seeked', onSeek, { once: true });
     video.currentTime = time;
-
-    // Timeout fallback in case seek event misses
     setTimeout(() => {
-      video.removeEventListener('seeked', onSeeked);
+      video.removeEventListener('seeked', onSeek);
       resolve();
     }, 150);
   });
